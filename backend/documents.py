@@ -6,7 +6,7 @@ from cryptography.fernet import Fernet
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
 from psycopg import errors
 
-from . import db
+from . import db, graphbuild
 from .auth import current_user
 
 router = APIRouter(prefix="/api/documents")
@@ -70,7 +70,7 @@ def process_document(doc_id: int, user_id: int):
             if not chunks:
                 raise ValueError("no extractable text found")
             conn.execute(
-                "UPDATE documents SET total_chunks = %s WHERE id = %s",
+                "UPDATE documents SET status = 'extracting', total_chunks = %s WHERE id = %s",
                 (len(chunks), doc_id),
             )
             with conn.cursor() as cur:
@@ -78,9 +78,12 @@ def process_document(doc_id: int, user_id: int):
                     "INSERT INTO chunks (document_id, seq, page_no, text) VALUES (%s, %s, %s, %s)",
                     [(doc_id, i, p, t) for i, (p, t) in enumerate(chunks)],
                 )
+        graphbuild.extract_document(doc_id, user_id)
+        with db.connect() as conn:
             conn.execute(
-                "UPDATE documents SET status = 'processed', processed_chunks = %s WHERE id = %s",
-                (len(chunks), doc_id),
+                "UPDATE documents SET status = 'processed', processed_chunks = total_chunks"
+                " WHERE id = %s",
+                (doc_id,),
             )
     except Exception as e:
         with db.connect() as conn:
@@ -177,6 +180,13 @@ def delete_document(doc_id: int, user: dict = Depends(current_user)):
             "DELETE FROM documents WHERE id = %s AND user_id = %s RETURNING id",
             (doc_id, user["id"]),
         ).fetchone()
+        if gone:
+            # edges cascade with the document; sweep entities left with no edges
+            conn.execute(
+                "DELETE FROM entities e WHERE e.user_id = %s AND NOT EXISTS"
+                " (SELECT 1 FROM edges WHERE a_entity = e.id OR b_entity = e.id)",
+                (user["id"],),
+            )
     if not gone:
         raise HTTPException(404, "document not found")
     return {"ok": True}

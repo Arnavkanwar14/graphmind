@@ -39,6 +39,27 @@ CREATE TABLE IF NOT EXISTS chunks (
 );
 CREATE INDEX IF NOT EXISTS chunks_ts_idx ON chunks USING GIN (ts);
 CREATE INDEX IF NOT EXISTS chunks_doc_idx ON chunks (document_id);
+CREATE TABLE IF NOT EXISTS entities (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    norm_key TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'concept',
+    UNIQUE (user_id, norm_key)
+);
+CREATE TABLE IF NOT EXISTS edges (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    a_entity BIGINT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    b_entity BIGINT REFERENCES entities(id) ON DELETE CASCADE,
+    document_id BIGINT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    chunk_id BIGINT REFERENCES chunks(id) ON DELETE CASCADE,
+    label TEXT
+);
+CREATE INDEX IF NOT EXISTS edges_user_idx ON edges (user_id);
+CREATE INDEX IF NOT EXISTS edges_a_idx ON edges (a_entity);
+CREATE INDEX IF NOT EXISTS edges_b_idx ON edges (b_entity);
 """
 
 

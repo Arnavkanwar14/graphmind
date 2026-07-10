@@ -376,6 +376,54 @@ body {
 
 /* ---------- documents ---------- */
 
+.stat {
+  flex: 1;
+  min-width: 140px;
+  padding: 20px 24px;
+  background: var(--void);
+  border: 1px solid var(--rim);
+}
+
+.stat + .stat {
+  border-left: none;
+}
+
+.stat-value {
+  font-weight: 300;
+  font-size: 36px;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  color: var(--parchment);
+}
+
+.dropzone {
+  border: 1px dashed var(--rim);
+  border-radius: 0;
+  background: var(--void);
+  padding: 40px 32px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.25s var(--ease), background 0.25s var(--ease);
+  margin-bottom: 28px;
+}
+
+.dropzone:hover,
+.dropzone.drag {
+  border-color: var(--copper);
+  background: #131313;
+}
+
+.filetype-chip {
+  font-family: var(--grotesk);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--copper);
+  border: 1px solid var(--rim);
+  padding: 1px 7px;
+  flex: none;
+}
+
 .doc-row {
   display: flex;
   align-items: center;

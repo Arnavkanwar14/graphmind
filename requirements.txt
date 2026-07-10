@@ -5,3 +5,4 @@ cryptography
 pypdf
 python-multipart
 psycopg_pool
+groq

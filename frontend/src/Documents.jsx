@@ -5,11 +5,6 @@ function fmtSize(b) {
 }
 
 const ICONS = {
-  upload: (
-    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2">
-      <path d="M8 11V3M4.5 6.5 8 3l3.5 3.5M2.5 13.5h11" strokeLinecap="square" />
-    </svg>
-  ),
   s3: (
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2">
       <ellipse cx="8" cy="3.6" rx="5.5" ry="2.1" />
@@ -24,17 +19,14 @@ const ICONS = {
   ),
 };
 
-const CONNECTORS = [
-  ["upload", "Direct upload", ".md, .txt, .pdf — encrypted before storage", false],
-  ["s3", "Amazon S3", "Connect a bucket, sync its documents", true],
-  ["drive", "Google Drive", "Connect a folder, sync its documents", true],
-];
+const POLLING_STATES = ["uploaded", "extracting"];
 
 export default function Documents() {
   const [docs, setDocs] = useState([]);
   const [preview, setPreview] = useState(null); // {doc, chunks}
   const [uploading, setUploading] = useState(0);
   const [uploadError, setUploadError] = useState("");
+  const [drag, setDrag] = useState(false);
   const fileRef = useRef();
 
   async function refresh() {
@@ -46,9 +38,8 @@ export default function Documents() {
     refresh();
   }, []);
 
-  // poll while anything is still processing
   useEffect(() => {
-    if (!docs.some((d) => d.status === "uploaded")) return;
+    if (!docs.some((d) => POLLING_STATES.includes(d.status))) return;
     const t = setTimeout(refresh, 2000);
     return () => clearTimeout(t);
   }, [docs]);
@@ -70,9 +61,9 @@ export default function Documents() {
         failed.push(`${f.name}: network error`);
       }
       setUploading((n) => n - 1);
+      refresh();
     }
     if (failed.length) setUploadError(failed.join(" · "));
-    refresh();
   }
 
   async function openPreview(doc) {
@@ -84,6 +75,21 @@ export default function Documents() {
     await fetch(`/api/documents/${doc.id}`, { method: "DELETE" });
     if (preview?.doc.id === doc.id) setPreview(null);
     refresh();
+  }
+
+  const totalChunks = docs.reduce((n, d) => n + d.total_chunks, 0);
+  const totalBytes = docs.reduce((n, d) => n + d.size, 0);
+
+  function statusBadge(d) {
+    if (d.status === "processed") return <span className="badge ok">ready</span>;
+    if (d.status === "failed") return <span className="badge failed">failed</span>;
+    if (d.status === "extracting")
+      return (
+        <span className="badge">
+          building graph {d.total_chunks ? Math.round((100 * d.processed_chunks) / d.total_chunks) : 0}%
+        </span>
+      );
+    return <span className="badge">processing…</span>;
   }
 
   return (
@@ -112,24 +118,49 @@ export default function Documents() {
         </button>
       </div>
 
+      <div style={{ display: "flex", flexWrap: "wrap", marginBottom: 28 }}>
+        <div className="stat">
+          <p className="stat-value">{docs.length}</p>
+          <p className="micro" style={{ marginTop: 6 }}>documents</p>
+        </div>
+        <div className="stat">
+          <p className="stat-value">{totalChunks}</p>
+          <p className="micro" style={{ marginTop: 6 }}>chunks indexed</p>
+        </div>
+        <div className="stat">
+          <p className="stat-value">{totalBytes ? fmtSize(totalBytes) : "0 KB"}</p>
+          <p className="micro" style={{ marginTop: 6 }}>encrypted at rest</p>
+        </div>
+        <div className="stat" style={{ display: "flex", gap: 14, alignItems: "center" }}>
+          <span className="conn-icon">{ICONS.s3}</span>
+          <span className="conn-icon">{ICONS.drive}</span>
+          <div>
+            <p className="micro" style={{ color: "var(--limestone)" }}>S3 · Google Drive</p>
+            <p className="micro">connectors coming soon</p>
+          </div>
+        </div>
+      </div>
+
       <div style={{ display: "flex", gap: 32, alignItems: "flex-start", paddingBottom: 80 }}>
         <section style={{ flex: "1 1 480px", minWidth: 0 }}>
-          <div style={{ display: "flex", gap: 8, marginBottom: 28, flexWrap: "wrap" }}>
-            {CONNECTORS.map(([icon, title, blurb, soon]) => (
-              <div className={`connector${soon ? " disabled" : ""}`} key={icon}>
-                <span className="conn-icon">{ICONS[icon]}</span>
-                <div>
-                  <p
-                    className="eyebrow"
-                    style={{ marginBottom: 4, display: "flex", gap: 8, alignItems: "center" }}
-                  >
-                    {title}
-                    {soon && <span className="badge">soon</span>}
-                  </p>
-                  <p style={{ fontSize: 13, color: "var(--ash)", lineHeight: 1.45 }}>{blurb}</p>
-                </div>
-              </div>
-            ))}
+          <div
+            className={`dropzone${drag ? " drag" : ""}`}
+            onClick={() => fileRef.current.click()}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDrag(true);
+            }}
+            onDragLeave={() => setDrag(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDrag(false);
+              onFiles([...e.dataTransfer.files]);
+            }}
+          >
+            <p className="eyebrow" style={{ marginBottom: 6 }}>
+              Drop files here
+            </p>
+            <p className="micro">.md · .txt · .pdf — up to 10 MB each, encrypted with your key</p>
           </div>
 
           {uploadError && (
@@ -138,23 +169,13 @@ export default function Documents() {
             </p>
           )}
 
-          {docs.length === 0 && (
-            <div className="card" style={{ textAlign: "center", padding: 56 }}>
-              <p className="eyebrow" style={{ marginBottom: 8 }}>
-                No documents yet
-              </p>
-              <p style={{ color: "var(--fog)" }}>
-                Upload .md, .txt or .pdf files — they're encrypted before they're stored.
-              </p>
-            </div>
-          )}
-
           {docs.map((d) => (
             <div
               key={d.id}
               className={`doc-row${d.status === "processed" ? " clickable" : ""}`}
               onClick={() => d.status === "processed" && openPreview(d)}
             >
+              <span className="filetype-chip">{d.filename.split(".").pop()}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {d.filename}
@@ -165,11 +186,7 @@ export default function Documents() {
                   {d.status === "failed" && ` · ${d.error}`}
                 </div>
               </div>
-              <span
-                className={`badge${d.status === "processed" ? " ok" : d.status === "failed" ? " failed" : ""}`}
-              >
-                {d.status === "uploaded" ? "processing…" : d.status}
-              </span>
+              {statusBadge(d)}
               <button
                 className="btn-ghost-square"
                 style={{ padding: "4px 10px" }}
