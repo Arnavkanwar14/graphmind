@@ -1,10 +1,22 @@
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-app = FastAPI(title="GraphMind")
+from . import auth, db
+
+
+@asynccontextmanager
+async def lifespan(app):
+    if os.environ.get("DATABASE_URL"):
+        db.init_db()
+    yield
+
+
+app = FastAPI(title="GraphMind", lifespan=lifespan)
+app.include_router(auth.router)
 
 
 @app.get("/api/health")
