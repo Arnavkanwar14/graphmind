@@ -73,6 +73,31 @@ export default function Documents() {
           </button>
         </div>
 
+        <div style={{ display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap" }}>
+          <div className="card" style={{ flex: 1, minWidth: 180, padding: 16, borderRadius: 8 }}>
+            <p className="eyebrow" style={{ marginBottom: 4 }}>Direct upload</p>
+            <p style={{ fontSize: 14, color: "var(--fog)" }}>
+              .md, .txt, .pdf — encrypted before storage
+            </p>
+          </div>
+          <div className="card" style={{ flex: 1, minWidth: 180, padding: 16, borderRadius: 8, opacity: 0.55 }}>
+            <p className="eyebrow" style={{ marginBottom: 4 }}>
+              Amazon S3 <span className="badge" style={{ marginLeft: 6 }}>soon</span>
+            </p>
+            <p style={{ fontSize: 14, color: "var(--fog)" }}>
+              Connect a bucket, sync its documents
+            </p>
+          </div>
+          <div className="card" style={{ flex: 1, minWidth: 180, padding: 16, borderRadius: 8, opacity: 0.55 }}>
+            <p className="eyebrow" style={{ marginBottom: 4 }}>
+              Google Drive <span className="badge" style={{ marginLeft: 6 }}>soon</span>
+            </p>
+            <p style={{ fontSize: 14, color: "var(--fog)" }}>
+              Connect a folder, sync its documents
+            </p>
+          </div>
+        </div>
+
         {docs.length === 0 && (
           <div className="card" style={{ textAlign: "center", padding: 56 }}>
             <p className="eyebrow" style={{ marginBottom: 8 }}>No documents yet</p>
