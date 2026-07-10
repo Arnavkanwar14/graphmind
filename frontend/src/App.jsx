@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import Auth from "./Auth.jsx";
+import Documents from "./Documents.jsx";
 
 const TABS = ["Documents", "Graph", "Chat"];
 
@@ -60,7 +61,7 @@ export default function App() {
         </button>
       </nav>
       <main style={{ maxWidth: 1200, margin: "0 auto", padding: "0 32px" }}>
-        <Placeholder name={tab} />
+        {tab === "Documents" ? <Documents /> : <Placeholder name={tab} />}
       </main>
     </div>
   );

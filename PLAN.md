@@ -6,7 +6,7 @@ GraphMind is a SaaS web app: a company signs up, uploads its documents (later: c
 
 **Stack (decided, don't relitigate):** FastAPI (Python 3.10, own venv) serving a built React/Vite frontend from one process — one Render free-tier deploy, no CORS. Postgres on Neon free tier (Render's free disk is ephemeral, so nothing durable lives on it). Groq for all LLM calls (Arnav's free key). Postgres full-text search for retrieval in MVP — no embeddings/vector DB yet. Graph viz: react-force-graph-2d. Auth: email+password, `hashlib.scrypt` (stdlib — no passlib/bcrypt dep) + a `sessions` table with `secrets.token_hex` cookie (no JWT lib; revocation = DELETE row). File blobs encrypted with Fernet (`ENCRYPTION_KEY` env), stored as bytea in Postgres, 10 MB/file cap.
 
-**Dependency budget (ponytail rule):** backend = fastapi, uvicorn, psycopg, cryptography, pypdf, groq. Frontend = react, react-force-graph-2d. Anything beyond this list needs a reason written into this file.
+**Dependency budget (ponytail rule):** backend = fastapi, uvicorn, psycopg, cryptography, pypdf, groq, python-multipart (FastAPI requires it to parse multipart uploads — no stdlib alternative). Frontend = react, react-force-graph-2d. Anything beyond this list needs a reason written into this file.
 
 **Owner's standing rules:** free tiers only, keys in gitignored `.env` (committed `.env.example`), commit+push each verified feature, smallest change that solves the step, "done" = ran it and saw it work.
 
