@@ -33,13 +33,11 @@ def health():
     if not url:
         return {"db": "not configured"}
     try:
-        import psycopg
-
-        with psycopg.connect(url, connect_timeout=5) as conn:
+        with db.connect() as conn:
             conn.execute("SELECT 1")
         return {"db": "ok"}
-    except Exception as e:
-        return {"db": "error", "detail": str(e)}
+    except Exception:
+        return {"db": "error"}
 
 
 dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"

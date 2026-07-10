@@ -5,6 +5,7 @@ import secrets
 
 from cryptography.fernet import Fernet
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from psycopg import errors
 from pydantic import BaseModel
 
 from . import db
@@ -52,7 +53,8 @@ def current_user(request: Request) -> dict:
         with db.connect() as conn:
             row = conn.execute(
                 "SELECT u.id, u.email, u.enc_key FROM sessions s"
-                " JOIN users u ON u.id = s.user_id WHERE s.token = %s",
+                " JOIN users u ON u.id = s.user_id WHERE s.token = %s"
+                " AND s.created_at > now() - interval '30 days'",
                 (token,),
             ).fetchone()
         if row:
@@ -63,8 +65,8 @@ def current_user(request: Request) -> dict:
 @router.post("/signup")
 def signup(creds: Credentials, resp: Response):
     email = creds.email.strip().lower()
-    if "@" not in email or len(creds.password) < 8:
-        raise HTTPException(400, "valid email and password of 8+ characters required")
+    if "@" not in email or not 8 <= len(creds.password) <= 256:
+        raise HTTPException(400, "valid email and password of 8-256 characters required")
     token = secrets.token_hex(32)
     with db.connect() as conn:
         try:
@@ -73,7 +75,7 @@ def signup(creds: Credentials, resp: Response):
                 " VALUES (%s, %s, %s) RETURNING id",
                 (email, _hash_pw(creds.password), _wrapped_user_key()),
             ).fetchone()
-        except Exception:
+        except errors.UniqueViolation:
             raise HTTPException(409, "email already registered")
         conn.execute(
             "INSERT INTO sessions (token, user_id) VALUES (%s, %s)", (token, row[0])
@@ -85,11 +87,16 @@ def signup(creds: Credentials, resp: Response):
 @router.post("/login")
 def login(creds: Credentials, resp: Response):
     email = creds.email.strip().lower()
+    if len(creds.password) > 256:
+        raise HTTPException(401, "wrong email or password")
     with db.connect() as conn:
         row = conn.execute(
             "SELECT id, password_hash FROM users WHERE email = %s", (email,)
         ).fetchone()
-        if not row or not _check_pw(creds.password, row[1]):
+        if not row:
+            _hash_pw(creds.password)  # equalize timing so unknown emails aren't faster
+            raise HTTPException(401, "wrong email or password")
+        if not _check_pw(creds.password, row[1]):
             raise HTTPException(401, "wrong email or password")
         token = secrets.token_hex(32)
         conn.execute(

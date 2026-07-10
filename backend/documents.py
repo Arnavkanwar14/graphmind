@@ -4,6 +4,7 @@ import os
 
 from cryptography.fernet import Fernet
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
+from psycopg import errors
 
 from . import db
 from .auth import current_user
@@ -98,9 +99,14 @@ async def upload(
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in ALLOWED:
         raise HTTPException(400, f"only {', '.join(sorted(ALLOWED))} files are supported")
-    data = await file.read()
-    if len(data) > MAX_SIZE:
-        raise HTTPException(400, "file exceeds the 10 MB limit")
+    # read incrementally so an oversized body is rejected without buffering it all
+    parts, size = [], 0
+    while piece := await file.read(1024 * 1024):
+        size += len(piece)
+        if size > MAX_SIZE:
+            raise HTTPException(400, "file exceeds the 10 MB limit")
+        parts.append(piece)
+    data = b"".join(parts)
     if not data:
         raise HTTPException(400, "file is empty")
     sha = hashlib.sha256(data).hexdigest()
@@ -112,11 +118,19 @@ async def upload(
         ).fetchone()
         if dup:
             return {"id": dup[0], "duplicate": True}
-        row = conn.execute(
-            "INSERT INTO documents (user_id, filename, size, sha256, blob_encrypted)"
-            " VALUES (%s, %s, %s, %s, %s) RETURNING id",
-            (user["id"], file.filename, len(data), sha, encrypted),
-        ).fetchone()
+        try:
+            row = conn.execute(
+                "INSERT INTO documents (user_id, filename, size, sha256, blob_encrypted)"
+                " VALUES (%s, %s, %s, %s, %s) RETURNING id",
+                (user["id"], file.filename, len(data), sha, encrypted),
+            ).fetchone()
+        except errors.UniqueViolation:
+            conn.rollback()
+            dup = conn.execute(
+                "SELECT id FROM documents WHERE user_id = %s AND sha256 = %s",
+                (user["id"], sha),
+            ).fetchone()
+            return {"id": dup[0], "duplicate": True}
     background.add_task(process_document, row[0], user["id"])
     return {"id": row[0], "duplicate": False}
 

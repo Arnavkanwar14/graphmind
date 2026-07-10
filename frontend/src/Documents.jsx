@@ -14,6 +14,7 @@ export default function Documents() {
   const [docs, setDocs] = useState([]);
   const [preview, setPreview] = useState(null); // {doc, chunks}
   const [uploading, setUploading] = useState(0);
+  const [uploadError, setUploadError] = useState("");
   const fileRef = useRef();
 
   async function refresh() {
@@ -34,12 +35,23 @@ export default function Documents() {
 
   async function onFiles(files) {
     setUploading(files.length);
+    setUploadError("");
+    const failed = [];
     for (const f of files) {
       const form = new FormData();
       form.append("file", f);
-      await fetch("/api/documents", { method: "POST", body: form });
+      try {
+        const r = await fetch("/api/documents", { method: "POST", body: form });
+        if (!r.ok) {
+          const data = await r.json().catch(() => ({}));
+          failed.push(`${f.name}: ${data.detail || r.status}`);
+        }
+      } catch {
+        failed.push(`${f.name}: network error`);
+      }
       setUploading((n) => n - 1);
     }
+    if (failed.length) setUploadError(failed.join(" · "));
     refresh();
   }
 
@@ -97,6 +109,12 @@ export default function Documents() {
             </p>
           </div>
         </div>
+
+        {uploadError && (
+          <p className="error" style={{ marginBottom: 16 }}>
+            {uploadError}
+          </p>
+        )}
 
         {docs.length === 0 && (
           <div className="card" style={{ textAlign: "center", padding: 56 }}>

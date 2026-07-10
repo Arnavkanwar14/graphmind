@@ -11,15 +11,20 @@ export default function Auth({ onLogin }) {
     e.preventDefault();
     setBusy(true);
     setError("");
-    const r = await fetch(`/api/auth/${mode}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    });
-    const data = await r.json().catch(() => ({}));
-    setBusy(false);
-    if (r.ok) onLogin(data);
-    else setError(data.detail || "something went wrong");
+    try {
+      const r = await fetch(`/api/auth/${mode}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.ok) onLogin(data);
+      else setError(data.detail || "something went wrong");
+    } catch {
+      setError("can't reach the server — try again in a moment");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (

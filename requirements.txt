@@ -4,3 +4,4 @@ psycopg[binary]
 cryptography
 pypdf
 python-multipart
+psycopg_pool

@@ -1,7 +1,6 @@
 import os
-import time
 
-import psycopg
+from psycopg_pool import ConnectionPool
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -43,15 +42,22 @@ CREATE INDEX IF NOT EXISTS chunks_doc_idx ON chunks (document_id);
 """
 
 
+_pool = None
+
+
 def connect():
-    # Neon free tier suspends compute when idle; first connection can fail
-    # while it wakes, so retry once.
-    url = os.environ["DATABASE_URL"]
-    try:
-        return psycopg.connect(url, connect_timeout=10)
-    except psycopg.OperationalError:
-        time.sleep(3)
-        return psycopg.connect(url, connect_timeout=15)
+    # pooled: avoids a fresh TLS handshake to Neon on every request; the pool
+    # also retries internally while Neon's suspended compute wakes up
+    global _pool
+    if _pool is None:
+        _pool = ConnectionPool(
+            os.environ["DATABASE_URL"],
+            min_size=0,
+            max_size=4,
+            kwargs={"connect_timeout": 15},
+            open=True,
+        )
+    return _pool.connection()
 
 
 def init_db():
