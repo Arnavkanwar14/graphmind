@@ -12,7 +12,7 @@ if _env.is_file():
             k, _, v = _line.partition("=")
             os.environ.setdefault(k.strip(), v.strip())
 
-from . import auth, db, documents, graph
+from . import auth, chat, db, documents, graph
 
 
 @asynccontextmanager
@@ -26,6 +26,7 @@ app = FastAPI(title="GraphMind", lifespan=lifespan)
 app.include_router(auth.router)
 app.include_router(documents.router)
 app.include_router(graph.router)
+app.include_router(chat.router)
 
 
 @app.get("/api/health")

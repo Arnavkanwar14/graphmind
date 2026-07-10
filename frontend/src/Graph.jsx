@@ -10,18 +10,38 @@ const TYPE_COLORS = {
   document: "#185849",
 };
 
-export default function Graph() {
+export default function Graph({ focusEntity, onFocused }) {
   const [data, setData] = useState(null);
   const [detail, setDetail] = useState(null); // {name, type, relations, sources, documents}
   const [size, setSize] = useState({ w: 800, h: 560 });
   const wrapRef = useRef();
   const fgRef = useRef();
+  const highlightRef = useRef(null);
 
   useEffect(() => {
     fetch("/api/graph")
       .then((r) => (r.ok ? r.json() : { nodes: [], links: [] }))
       .then(setData);
   }, []);
+
+  // arriving from chat: center on the entity, ring it, open its panel
+  useEffect(() => {
+    if (!focusEntity || !data) return;
+    const nid = `e${focusEntity}`;
+    highlightRef.current = nid;
+    fetch(`/api/graph/entity/${focusEntity}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d && setDetail(d));
+    const t = setTimeout(() => {
+      const node = data.nodes.find((n) => n.id === nid);
+      if (node && fgRef.current && node.x != null) {
+        fgRef.current.centerAt(node.x, node.y, 700);
+        fgRef.current.zoom(3.5, 700);
+      }
+      onFocused?.();
+    }, 800);
+    return () => clearTimeout(t);
+  }, [focusEntity, data]);
 
   useEffect(() => {
     function measure() {
@@ -46,6 +66,13 @@ export default function Graph() {
     if (node.type === "document") {
       ctx.strokeStyle = "#e9ebdf";
       ctx.lineWidth = 0.7;
+      ctx.stroke();
+    }
+    if (node.id === highlightRef.current) {
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, r + 3, 0, 2 * Math.PI);
+      ctx.strokeStyle = "#e9ebdf";
+      ctx.lineWidth = 1.2;
       ctx.stroke();
     }
     if (scale > 1.4 || (node.degree || 0) > 6) {

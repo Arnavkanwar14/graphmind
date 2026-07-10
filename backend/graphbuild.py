@@ -19,7 +19,8 @@ SYS = (
     '{"entities": [{"name": str, "type": "person"|"org"|"product"|"concept"|"place"}],\n'
     ' "relations": [{"source": str, "target": str, "label": str, "chunk": int}]}\n'
     "entities: the distinct named things (products, companies, people, technical concepts, places) "
-    "that this text is actually about — skip generic words. "
+    "that this text is actually about — skip generic words. ALWAYS include the document's main "
+    "topic itself as a concept entity (e.g. a page about function calling gets a 'function calling' entity). "
     "relations: direct relationships stated in the text between those entities; label is a short "
     "verb phrase (e.g. 'runs on', 'part of', 'created by'); chunk is the [chunk N] number it came from. "
     "At most 15 entities and 15 relations per response. Only what the text supports."

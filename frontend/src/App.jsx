@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import Auth from "./Auth.jsx";
+import Chat from "./Chat.jsx";
 import Documents from "./Documents.jsx";
 import Graph from "./Graph.jsx";
 
@@ -37,6 +38,12 @@ function Placeholder({ name }) {
 export default function App() {
   const [user, setUser] = useState(undefined); // undefined = checking
   const [tab, setTab] = useState("Documents");
+  const [focusEntity, setFocusEntity] = useState(null);
+
+  function showEntity(id) {
+    setFocusEntity(id);
+    setTab("Graph");
+  }
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -76,7 +83,13 @@ export default function App() {
         </button>
       </nav>
       <main className="page">
-        {tab === "Documents" ? <Documents /> : tab === "Graph" ? <Graph /> : <Placeholder name={tab} />}
+        {tab === "Documents" ? (
+          <Documents />
+        ) : tab === "Graph" ? (
+          <Graph focusEntity={focusEntity} onFocused={() => setFocusEntity(null)} />
+        ) : (
+          <Chat onShowEntity={showEntity} />
+        )}
       </main>
     </div>
   );
