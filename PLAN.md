@@ -10,7 +10,7 @@ GraphMind is a SaaS web app: a company signs up, uploads its documents (later: c
 
 **Owner's standing rules:** free tiers only, keys in gitignored `.env` (committed `.env.example`), commit+push each verified feature, smallest change that solves the step, "done" = ran it and saw it work.
 
-**Status:** Stage 0 not started. Working dir: `C:\Users\bifro\OneDrive\Desktop\graphmind`.
+**Status (2026-07-10):** Stages 0–1 done and verified — live at https://graphmind-r439.onrender.com (Render free + Neon free). Auth works end to end (UI tested: signup, refresh persistence, logout). Design system: Retool-inspired "warm obsidian" brief from Arnav, tokens in `frontend/src/index.css`. Next: Stage 2 (upload → encrypt → extract → chunk). Working dir: `C:\Users\bifro\OneDrive\Desktop\graphmind`.
 
 ## Decisions and rejected alternatives
 
