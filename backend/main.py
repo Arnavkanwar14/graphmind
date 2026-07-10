@@ -5,6 +5,13 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+_env = Path(__file__).resolve().parent.parent / ".env"
+if _env.is_file():
+    for _line in _env.read_text().splitlines():
+        if "=" in _line and not _line.startswith("#"):
+            k, _, v = _line.partition("=")
+            os.environ.setdefault(k.strip(), v.strip())
+
 from . import auth, db
 
 
