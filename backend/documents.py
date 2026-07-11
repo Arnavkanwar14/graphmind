@@ -13,6 +13,8 @@ router = APIRouter(prefix="/api/documents")
 
 ALLOWED = {".md", ".txt", ".pdf"}
 MAX_SIZE = 10 * 1024 * 1024
+MAX_USER_BYTES = 100 * 1024 * 1024  # blobs live in Neon's 0.5 GB free tier
+MAX_PDF_PAGES = 500
 CHUNK_CHARS = 1500
 
 
@@ -27,7 +29,8 @@ def _extract(filename: str, data: bytes) -> list[tuple[int | None, str]]:
         from pypdf import PdfReader
 
         reader = PdfReader(io.BytesIO(data))
-        return [(i + 1, page.extract_text() or "") for i, page in enumerate(reader.pages)]
+        pages = reader.pages[:MAX_PDF_PAGES]
+        return [(i + 1, page.extract_text() or "") for i, page in enumerate(pages)]
     return [(None, data.decode("utf-8", errors="replace"))]
 
 
@@ -128,6 +131,12 @@ def ingest_bytes(user: dict, filename: str, data: bytes):
     sha = hashlib.sha256(data).hexdigest()
     encrypted = user_fernet(user["enc_key"]).encrypt(data)
     with db.connect() as conn:
+        used = conn.execute(
+            "SELECT coalesce(sum(size), 0) FROM documents WHERE user_id = %s",
+            (user["id"],),
+        ).fetchone()[0]
+        if used + len(data) > MAX_USER_BYTES:
+            raise HTTPException(400, "storage limit reached (100 MB per account)")
         dup = conn.execute(
             "SELECT id FROM documents WHERE user_id = %s AND sha256 = %s",
             (user["id"], sha),

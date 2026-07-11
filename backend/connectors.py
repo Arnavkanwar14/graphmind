@@ -170,8 +170,11 @@ def _drive_get(access_token: str, url: str, raw: bool = False):
 @router.get("/gdrive/auth")
 def gdrive_auth(request: Request, user: dict = Depends(current_user)):
     cid, _ = _google_creds()
+    now = time.time()
+    for k in [k for k, (_, t) in _oauth_states.items() if now - t > 600]:
+        _oauth_states.pop(k, None)
     state = secrets.token_urlsafe(24)
-    _oauth_states[state] = (user["id"], time.time())
+    _oauth_states[state] = (user["id"], now)
     params = urllib.parse.urlencode(
         {
             "client_id": cid,
