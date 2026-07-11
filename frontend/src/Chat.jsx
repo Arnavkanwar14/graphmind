@@ -111,11 +111,11 @@ export default function Chat({ onShowEntity }) {
               {m.citations?.length > 0 && (
                 <div style={{ marginTop: 14 }}>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-                    {m.citations.filter((c) => m.content.includes(`[${c.n}]`)).map((c) => (
+                    {m.citations.filter((c) => m.content.includes(`[${c.n}]`)).map((c, ci) => (
                       <button
                         key={c.n}
-                        className="btn-ghost-square"
-                        style={{ padding: "3px 10px", fontSize: 12, fontFamily: "var(--grotesk)" }}
+                        className="btn-ghost-square rise"
+                        style={{ padding: "3px 10px", fontSize: 12, fontFamily: "var(--grotesk)", animationDelay: `${ci * 60}ms` }}
                         onClick={() => setOpenCite(openCite === `${mi}-${c.n}` ? null : `${mi}-${c.n}`)}
                       >
                         [{c.n}] {c.document.length > 26 ? c.document.slice(0, 24) + "…" : c.document}
@@ -164,8 +164,13 @@ export default function Chat({ onShowEntity }) {
         ))}
 
         {busy && (
-          <p className="micro" style={{ color: "var(--copper)" }}>
-            tracing the graph…
+          <p className="micro" style={{ color: "var(--copper)", display: "flex", alignItems: "center", gap: 8 }}>
+            tracing the graph
+            <span className="typing-dots">
+              <span />
+              <span />
+              <span />
+            </span>
           </p>
         )}
         <div ref={endRef} />
@@ -174,7 +179,7 @@ export default function Chat({ onShowEntity }) {
       <form onSubmit={send} style={{ position: "sticky", bottom: 0, background: "var(--canvas)", padding: "16px 0 28px", display: "flex", gap: 10 }}>
         <input
           className="input"
-          style={{ flex: 1 }}
+          style={{ flex: 1, transition: "border-color 0.25s var(--ease), box-shadow 0.25s var(--ease)" }}
           placeholder="Ask about your documents…"
           value={input}
           onChange={(e) => setInput(e.target.value)}

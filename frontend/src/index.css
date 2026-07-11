@@ -191,6 +191,71 @@ body {
   color: var(--parchment);
 }
 
+/* scroll-reveal: paired with the useReveal() hook, which adds .in-view */
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition: opacity 0.6s var(--ease), transform 0.6s var(--ease);
+}
+
+.reveal.in-view {
+  opacity: 1;
+  transform: none;
+}
+
+/* shimmer sweep for in-progress badges (extraction, sync) */
+.badge.working {
+  position: relative;
+  overflow: hidden;
+  background: var(--moss);
+}
+
+.badge.working::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(233, 235, 223, 0.28), transparent);
+  animation: shimmer-sweep 1.4s linear infinite;
+}
+
+@keyframes shimmer-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+
+/* three-dot typing indicator */
+.typing-dots {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.typing-dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 9999px;
+  background: var(--copper);
+  animation: dot-bounce 1.2s var(--ease) infinite;
+}
+
+.typing-dots span:nth-child(2) { animation-delay: 0.15s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes dot-bounce {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
+}
+
+/* stat number count-up mount */
+.stat-value {
+  font-variant-numeric: tabular-nums;
+}
+
+/* message entrance for chat bubbles */
+.msg-in {
+  animation: rise 0.4s var(--ease) forwards;
+}
+
 /* soft color glow washes inside dark panels (mp4 section visuals) */
 .glow-teal {
   background:
@@ -297,7 +362,7 @@ body {
   border-radius: 9999px;
   padding: 9px 22px;
   cursor: pointer;
-  transition: background 0.25s var(--ease), border-color 0.25s var(--ease);
+  transition: background 0.25s var(--ease), border-color 0.25s var(--ease), transform 0.15s var(--ease);
 }
 
 .btn-pill:hover {
@@ -305,9 +370,14 @@ body {
   border-color: var(--fog);
 }
 
+.btn-pill:active {
+  transform: scale(0.96);
+}
+
 .btn-pill:disabled {
   opacity: 0.5;
   cursor: default;
+  transform: none;
 }
 
 .btn-ghost-pill {
@@ -320,11 +390,15 @@ body {
   border-radius: 9999px;
   padding: 8px 18px;
   cursor: pointer;
-  transition: background 0.25s var(--ease);
+  transition: background 0.25s var(--ease), transform 0.15s var(--ease);
 }
 
 .btn-ghost-pill:hover {
   background: rgba(233, 235, 223, 0.08);
+}
+
+.btn-ghost-pill:active {
+  transform: scale(0.96);
 }
 
 .btn-ghost-square {
@@ -337,11 +411,15 @@ body {
   border-radius: 0;
   padding: 7px 14px;
   cursor: pointer;
-  transition: border-color 0.25s var(--ease);
+  transition: border-color 0.25s var(--ease), transform 0.15s var(--ease), color 0.25s var(--ease);
 }
 
 .btn-ghost-square:hover {
   border-color: var(--parchment);
+}
+
+.btn-ghost-square:active {
+  transform: scale(0.94);
 }
 
 /* ---------- surfaces ---------- */
@@ -488,6 +566,24 @@ body {
 .dropzone.drag {
   border-color: var(--copper);
   background: #131313;
+}
+
+.dropzone.drag {
+  animation: pulse-border 1s var(--ease) infinite;
+}
+
+@keyframes pulse-border {
+  0%, 100% { border-color: var(--copper); }
+  50% { border-color: var(--parchment); }
+}
+
+.stat {
+  transition: border-color 0.25s var(--ease), transform 0.25s var(--ease);
+}
+
+.stat:hover {
+  transform: translateY(-2px);
+  border-color: var(--copper);
 }
 
 .filetype-chip {

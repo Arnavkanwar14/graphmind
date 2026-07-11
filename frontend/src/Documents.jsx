@@ -179,11 +179,11 @@ export default function Documents() {
     if (d.status === "failed") return <span className="badge failed">failed</span>;
     if (d.status === "extracting")
       return (
-        <span className="badge">
+        <span className="badge working">
           building graph {d.total_chunks ? Math.round((100 * d.processed_chunks) / d.total_chunks) : 0}%
         </span>
       );
-    return <span className="badge">processing…</span>;
+    return <span className="badge working">processing…</span>;
   }
 
   return (
@@ -213,15 +213,15 @@ export default function Documents() {
       </div>
 
       <div style={{ display: "flex", flexWrap: "wrap", marginBottom: 28 }}>
-        <div className="stat">
+        <div className="stat rise">
           <p className="stat-value">{docs.length}</p>
           <p className="micro" style={{ marginTop: 6 }}>documents</p>
         </div>
-        <div className="stat">
+        <div className="stat rise" style={{ animationDelay: "40ms" }}>
           <p className="stat-value">{totalChunks}</p>
           <p className="micro" style={{ marginTop: 6 }}>chunks indexed</p>
         </div>
-        <div className="stat">
+        <div className="stat rise" style={{ animationDelay: "80ms" }}>
           <p className="stat-value">{totalBytes ? fmtSize(totalBytes) : "0 KB"}</p>
           <p className="micro" style={{ marginTop: 6 }}>encrypted at rest</p>
         </div>
@@ -231,7 +231,7 @@ export default function Documents() {
         ].map(([kind, title]) => {
           const conn = conns.find((c) => c.kind === (kind === "drive" ? "gdrive" : kind));
           return (
-            <div className="stat" key={kind} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+            <div className="stat rise" key={kind} style={{ display: "flex", gap: 12, alignItems: "flex-start", animationDelay: kind === "drive" ? "60ms" : "0ms" }}>
               <span className="conn-icon">{ICONS[kind]}</span>
               <div style={{ minWidth: 0 }}>
                 <p className="micro" style={{ color: "var(--limestone)", display: "flex", gap: 6, alignItems: "center" }}>
@@ -305,10 +305,11 @@ export default function Documents() {
             </p>
           )}
 
-          {docs.map((d) => (
+          {docs.map((d, i) => (
             <div
               key={d.id}
-              className={`doc-row${d.status === "processed" ? " clickable" : ""}`}
+              className={`doc-row rise${d.status === "processed" ? " clickable" : ""}`}
+              style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}
               onClick={() => d.status === "processed" && openPreview(d)}
             >
               <span className="filetype-chip">{d.filename.split(".").pop()}</span>

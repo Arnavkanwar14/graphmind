@@ -1,13 +1,15 @@
 import React, { useEffect, useState } from "react";
 import { TYPE_COLORS } from "./Graph.jsx";
+import { useCountUp, useReveal } from "./motion.js";
 
 const SINGLE = "#3fa17e"; // one hue for single-series magnitude charts
 
 function HBar({ rows, color, dot }) {
   // rows: [{label, value, type?}]; color: fixed hue or (row) => hue
+  const [ref, shown] = useReveal();
   const max = Math.max(...rows.map((r) => r.value), 1);
   return (
-    <div>
+    <div ref={ref}>
       {rows.map((r, i) => (
         <div
           key={i}
@@ -26,12 +28,12 @@ function HBar({ rows, color, dot }) {
           <div style={{ flex: 1, height: 14, position: "relative" }}>
             <div
               style={{
-                width: `${(100 * r.value) / max}%`,
-                minWidth: 3,
+                width: shown ? `${(100 * r.value) / max}%` : 0,
+                minWidth: shown ? 3 : 0,
                 height: "100%",
                 background: typeof color === "function" ? color(r) : color,
                 borderRadius: "0 4px 4px 0",
-                transition: "opacity 0.2s",
+                transition: `width 0.7s var(--ease) ${i * 40}ms`,
               }}
             />
           </div>
@@ -44,13 +46,23 @@ function HBar({ rows, color, dot }) {
 
 function Columns({ rows }) {
   // rows: [{day, count}] — column chart, single hue
+  const [ref, shown] = useReveal();
   const max = Math.max(...rows.map((r) => r.count), 1);
   return (
-    <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 120, borderBottom: "1px solid var(--rim)", paddingBottom: 0 }}>
-      {rows.map((r) => (
+    <div ref={ref} style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 120, borderBottom: "1px solid var(--rim)", paddingBottom: 0 }}>
+      {rows.map((r, i) => (
         <div key={r.day} title={`${r.day}: ${r.count} document${r.count === 1 ? "" : "s"}`} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minWidth: 20 }}>
           <span className="micro">{r.count}</span>
-          <div style={{ width: "70%", maxWidth: 34, height: Math.max(4, (96 * r.count) / max), background: SINGLE, borderRadius: "4px 4px 0 0" }} />
+          <div
+            style={{
+              width: "70%",
+              maxWidth: 34,
+              height: shown ? Math.max(4, (96 * r.count) / max) : 0,
+              background: SINGLE,
+              borderRadius: "4px 4px 0 0",
+              transition: `height 0.6s var(--ease) ${i * 50}ms`,
+            }}
+          />
           <span className="micro" style={{ fontSize: 10 }}>{r.day.slice(5)}</span>
         </div>
       ))}
@@ -63,6 +75,16 @@ function Panel({ title, children, glow, delay = 0 }) {
     <div className={`card rise${glow ? ` ${glow}` : ""}`} style={{ flex: "1 1 340px", minWidth: 300, animationDelay: `${delay}ms` }}>
       <p className="eyebrow" style={{ marginBottom: 16 }}>{title}</p>
       {children}
+    </div>
+  );
+}
+
+function StatTile({ value, label, delay }) {
+  const count = useCountUp(value);
+  return (
+    <div className="stat rise" style={{ animationDelay: `${delay}ms` }}>
+      <p className="stat-value">{count}</p>
+      <p className="micro" style={{ marginTop: 6 }}>{label}</p>
     </div>
   );
 }
@@ -96,10 +118,7 @@ export default function Dashboard() {
 
       <div style={{ display: "flex", flexWrap: "wrap", marginBottom: 28 }}>
         {tiles.map(([v, label], i) => (
-          <div className="stat rise" key={label} style={{ animationDelay: `${60 + i * 60}ms` }}>
-            <p className="stat-value">{v}</p>
-            <p className="micro" style={{ marginTop: 6 }}>{label}</p>
-          </div>
+          <StatTile key={label} value={v} label={label} delay={60 + i * 60} />
         ))}
       </div>
 
