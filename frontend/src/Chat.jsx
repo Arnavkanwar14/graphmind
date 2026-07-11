@@ -103,8 +103,8 @@ export default function Chat({ onShowEntity }) {
 
               {m.citations?.length > 0 && (
                 <div style={{ marginTop: 14 }}>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {m.citations.map((c) => (
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                    {m.citations.filter((c) => m.content.includes(`[${c.n}]`)).map((c) => (
                       <button
                         key={c.n}
                         className="btn-ghost-square"
@@ -115,6 +115,12 @@ export default function Chat({ onShowEntity }) {
                         {c.page_no != null && ` · p.${c.page_no}`}
                       </button>
                     ))}
+                    {(() => {
+                      const uncited = m.citations.filter((c) => !m.content.includes(`[${c.n}]`)).length;
+                      return uncited > 0 ? (
+                        <span className="micro">+{uncited} more source{uncited === 1 ? "" : "s"} searched</span>
+                      ) : null;
+                    })()}
                   </div>
                   {m.citations.map(
                     (c) =>

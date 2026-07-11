@@ -15,10 +15,11 @@ router = APIRouter(prefix="/api/chat")
 SYS = (
     "You are GraphMind, answering questions strictly from the user's own documents.\n"
     "Use ONLY the numbered SOURCES and the KNOWLEDGE GRAPH FACTS below. After every claim, "
-    "cite the source it came from with its number in brackets, like [1] or [2]. Use the graph "
-    "facts to connect information across documents, and mention the connecting relationship when "
-    "you do. If the sources don't contain the answer, say so plainly — never invent. "
-    "Keep answers concise."
+    "cite the source it came from with its number in brackets, like [1] or [2] — these numbers "
+    "are the ONLY citation format allowed; never write [KG FACT] or any other marker. Use the "
+    "graph facts to connect information across documents, mentioning the relationship in prose "
+    "and citing the numbered source behind it. If the sources don't contain the answer, say so "
+    "plainly — never invent. Keep answers concise."
 )
 
 
