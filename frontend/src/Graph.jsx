@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import ForceGraph2D from "react-force-graph-2d";
 
-const TYPE_COLORS = {
-  person: "#e8765e",
+// categorical palette validated against the dark surface (dataviz six checks)
+export const TYPE_COLORS = {
+  person: "#d95b41",
   org: "#518dd2",
   product: "#3fa17e",
-  concept: "#b6b8af",
-  place: "#c99a5b",
+  concept: "#8f7fc7",
+  place: "#b07f36",
   document: "#185849",
 };
 

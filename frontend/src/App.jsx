@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from "react";
 import Auth from "./Auth.jsx";
 import Chat from "./Chat.jsx";
+import Dashboard from "./Dashboard.jsx";
 import Documents from "./Documents.jsx";
 import Graph from "./Graph.jsx";
 
-const TABS = ["Documents", "Graph", "Chat"];
+const TABS = ["Documents", "Graph", "Chat", "Dashboard"];
 
 export function LogoMark() {
   // tiny constellation: three linked nodes, thin stroke, parchment on dark
@@ -87,8 +88,10 @@ export default function App() {
           <Documents />
         ) : tab === "Graph" ? (
           <Graph focusEntity={focusEntity} onFocused={() => setFocusEntity(null)} />
-        ) : (
+        ) : tab === "Chat" ? (
           <Chat onShowEntity={showEntity} />
+        ) : (
+          <Dashboard />
         )}
       </main>
     </div>

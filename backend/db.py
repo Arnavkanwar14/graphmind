@@ -95,3 +95,13 @@ def connect():
 def init_db():
     with connect() as conn:
         conn.execute(SCHEMA)
+        # background tasks die with the process; at boot, anything still marked
+        # in-flight is orphaned — settle it by what actually got done
+        conn.execute(
+            "UPDATE documents SET status = 'processed', processed_chunks = total_chunks"
+            " WHERE status IN ('uploaded', 'extracting') AND total_chunks > 0"
+        )
+        conn.execute(
+            "UPDATE documents SET status = 'failed', error = 'interrupted before processing'"
+            " WHERE status IN ('uploaded', 'extracting') AND total_chunks = 0"
+        )
