@@ -49,9 +49,9 @@ function Columns({ rows }) {
   const [ref, shown] = useReveal();
   const max = Math.max(...rows.map((r) => r.count), 1);
   return (
-    <div ref={ref} style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 120, borderBottom: "1px solid var(--rim)", paddingBottom: 0 }}>
+    <div ref={ref} style={{ display: "flex", alignItems: "flex-end", justifyContent: rows.length < 6 ? "flex-start" : "space-between", gap: rows.length < 6 ? 20 : 6, height: 120, borderBottom: "1px solid var(--rim)", paddingBottom: 0 }}>
       {rows.map((r, i) => (
-        <div key={r.day} title={`${r.day}: ${r.count} document${r.count === 1 ? "" : "s"}`} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minWidth: 20 }}>
+        <div key={r.day} title={`${r.day}: ${r.count} document${r.count === 1 ? "" : "s"}`} style={{ flex: rows.length < 6 ? "0 0 auto" : 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minWidth: 20 }}>
           <span className="micro">{r.count}</span>
           <div
             style={{
@@ -122,7 +122,7 @@ export default function Dashboard() {
         ))}
       </div>
 
-      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", paddingBottom: 80 }}>
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start", paddingBottom: 80 }}>
         {s.by_day.length > 0 && (
           <Panel title="Documents added · last 14 days" glow="glow-teal" delay={280}>
             <Columns rows={s.by_day} />
