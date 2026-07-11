@@ -20,7 +20,10 @@ _budget: dict = {}
 def check_budget(user_id: int, calls: int = 1):
     import datetime
 
-    key = (user_id, datetime.date.today().isoformat())
+    today = datetime.date.today().isoformat()
+    for k in [k for k in _budget if k[1] != today]:
+        _budget.pop(k, None)
+    key = (user_id, today)
     used = _budget.get(key, 0)
     if used + calls > DAILY_GROQ_CALLS:
         raise RuntimeError("daily AI budget reached — try again tomorrow")

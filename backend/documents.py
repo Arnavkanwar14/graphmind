@@ -138,11 +138,20 @@ def ingest_bytes(user: dict, filename: str, data: bytes):
         if used + len(data) > MAX_USER_BYTES:
             raise HTTPException(400, "storage limit reached (100 MB per account)")
         dup = conn.execute(
-            "SELECT id FROM documents WHERE user_id = %s AND sha256 = %s",
+            "SELECT id, status FROM documents WHERE user_id = %s AND sha256 = %s",
             (user["id"], sha),
         ).fetchone()
         if dup:
-            return dup[0], True
+            if dup[1] != "failed":
+                return dup[0], True
+            # re-uploading a failed doc = retry: clear partial state, reprocess
+            conn.execute("DELETE FROM chunks WHERE document_id = %s", (dup[0],))
+            conn.execute(
+                "UPDATE documents SET status = 'uploaded', error = NULL,"
+                " total_chunks = 0, processed_chunks = 0 WHERE id = %s",
+                (dup[0],),
+            )
+            return dup[0], False
         try:
             row = conn.execute(
                 "INSERT INTO documents (user_id, filename, size, sha256, blob_encrypted)"

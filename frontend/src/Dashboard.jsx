@@ -138,6 +138,21 @@ export default function Dashboard() {
           </Panel>
         )}
       </div>
+
+      <div style={{ borderTop: "1px solid var(--rim)", padding: "24px 0 64px" }}>
+        <p className="eyebrow" style={{ marginBottom: 8 }}>Danger zone</p>
+        <button
+          className="btn-ghost-square"
+          style={{ color: "var(--coral)", borderColor: "#4a1d15" }}
+          onClick={async () => {
+            if (!window.confirm("Delete your account and ALL its documents, graph data and connectors? This cannot be undone.")) return;
+            await fetch("/api/auth/account", { method: "DELETE" });
+            window.location.href = "/";
+          }}
+        >
+          Delete account &amp; all data
+        </button>
+      </div>
     </>
   );
 }

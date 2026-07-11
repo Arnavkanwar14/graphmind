@@ -105,3 +105,4 @@ def init_db():
             "UPDATE documents SET status = 'failed', error = 'interrupted before processing'"
             " WHERE status IN ('uploaded', 'extracting') AND total_chunks = 0"
         )
+        conn.execute("DELETE FROM sessions WHERE created_at < now() - interval '30 days'")

@@ -24,6 +24,9 @@ def _throttle(request: Request):
 
     ip = request.client.host if request.client else "?"
     now = time.time()
+    if len(_attempts) > 10000:  # prune stale IPs before the dict becomes the problem
+        for k in [k for k, ts in _attempts.items() if not ts or now - ts[-1] > RATE_WINDOW]:
+            _attempts.pop(k, None)
     recent = [t for t in _attempts.get(ip, []) if now - t < RATE_WINDOW]
     if len(recent) >= RATE_MAX:
         raise HTTPException(429, "too many attempts — wait a few minutes")
@@ -137,3 +140,12 @@ def logout(request: Request, resp: Response):
 @router.get("/me")
 def me(user: dict = Depends(current_user)):
     return {"id": user["id"], "email": user["email"]}
+
+
+@router.delete("/account")
+def delete_account(resp: Response, user: dict = Depends(current_user)):
+    # cascades take documents, chunks, entities, edges, sessions, connectors
+    with db.connect() as conn:
+        conn.execute("DELETE FROM users WHERE id = %s", (user["id"],))
+    resp.delete_cookie(COOKIE)
+    return {"ok": True}

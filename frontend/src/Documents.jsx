@@ -103,6 +103,11 @@ export default function Documents() {
   useEffect(() => {
     refresh();
     refreshConns();
+    const drive = new URLSearchParams(window.location.search).get("drive");
+    if (drive) {
+      setConnMsg(drive === "connected" ? "Google Drive connected — hit Sync now to pull your files." : "Google Drive connection was cancelled.");
+      window.history.replaceState(null, "", "/");
+    }
   }, []);
 
   async function connectDrive() {
