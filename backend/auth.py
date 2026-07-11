@@ -180,13 +180,20 @@ class ResetIn(BaseModel):
 def forgot(body: ForgotIn, request: Request):
     _throttle(request)
     email = body.email.strip().lower()
+    token = secrets.token_urlsafe(32)
     with db.connect() as conn:
         row = conn.execute("SELECT id FROM users WHERE email = %s", (email,)).fetchone()
         if row:
-            token = secrets.token_urlsafe(32)
             conn.execute(
                 "INSERT INTO password_resets (token, user_id) VALUES (%s, %s)", (token, row[0])
             )
+        else:
+            # No matching account: still spend one round trip so response timing
+            # can't be used to enumerate emails (measured ~400ms gap otherwise -
+            # security sweep). A SELECT by primary key mirrors the INSERT's one
+            # round trip without violating password_resets' user_id FK.
+            conn.execute("SELECT 1 FROM password_resets WHERE token = %s", (token,))
+        if row:
             base = str(request.base_url).rstrip("/")
             if "onrender.com" in base:
                 base = base.replace("http://", "https://")
