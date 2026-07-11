@@ -60,6 +60,17 @@ CREATE TABLE IF NOT EXISTS edges (
 CREATE INDEX IF NOT EXISTS edges_user_idx ON edges (user_id);
 CREATE INDEX IF NOT EXISTS edges_a_idx ON edges (a_entity);
 CREATE INDEX IF NOT EXISTS edges_b_idx ON edges (b_entity);
+CREATE TABLE IF NOT EXISTS connectors (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    label TEXT NOT NULL,
+    config_encrypted BYTEA NOT NULL,
+    last_sync TIMESTAMPTZ,
+    last_result TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (user_id, kind, label)
+);
 """
 
 

@@ -6,3 +6,4 @@ pypdf
 python-multipart
 psycopg_pool
 groq
+boto3

@@ -21,12 +21,73 @@ const ICONS = {
 
 const POLLING_STATES = ["uploaded", "extracting"];
 
+function S3Form({ onDone, onCancel }) {
+  const [f, setF] = useState({ bucket: "", region: "us-east-1", prefix: "", access_key: "", secret_key: "" });
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    setBusy(true);
+    setErr("");
+    try {
+      const r = await fetch("/api/connectors/s3", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(f),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.ok) onDone();
+      else setErr(data.detail || "connection failed");
+    } catch {
+      setErr("can't reach the server");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const field = (key, label, type = "text") => (
+    <div style={{ marginBottom: 12 }}>
+      <label className="field-label">{label}</label>
+      <input
+        className="input"
+        type={type}
+        value={f[key]}
+        required={key !== "prefix"}
+        onChange={(e) => setF({ ...f, [key]: e.target.value })}
+      />
+    </div>
+  );
+
+  return (
+    <form className="card" onSubmit={submit} style={{ marginBottom: 28, maxWidth: 480 }}>
+      <p className="eyebrow" style={{ marginBottom: 16 }}>Connect Amazon S3</p>
+      {field("bucket", "Bucket name")}
+      {field("region", "Region")}
+      {field("prefix", "Prefix (optional)")}
+      {field("access_key", "Access key ID")}
+      {field("secret_key", "Secret access key", "password")}
+      <p className="micro" style={{ marginBottom: 14 }}>
+        Use a read-only IAM key (s3:GetObject + s3:ListBucket). Stored encrypted with your key.
+      </p>
+      {err && <p className="error" style={{ marginBottom: 12 }}>{err}</p>}
+      <div style={{ display: "flex", gap: 10 }}>
+        <button className="btn-pill" disabled={busy}>{busy ? "checking…" : "Connect"}</button>
+        <button type="button" className="btn-ghost-square" onClick={onCancel}>Cancel</button>
+      </div>
+    </form>
+  );
+}
+
 export default function Documents() {
   const [docs, setDocs] = useState([]);
   const [preview, setPreview] = useState(null); // {doc, chunks}
   const [uploading, setUploading] = useState(0);
   const [uploadError, setUploadError] = useState("");
   const [drag, setDrag] = useState(false);
+  const [conns, setConns] = useState([]);
+  const [showS3Form, setShowS3Form] = useState(false);
+  const [connMsg, setConnMsg] = useState("");
   const fileRef = useRef();
 
   async function refresh() {
@@ -34,9 +95,37 @@ export default function Documents() {
     if (r.ok) setDocs(await r.json());
   }
 
+  async function refreshConns() {
+    const r = await fetch("/api/connectors");
+    if (r.ok) setConns(await r.json());
+  }
+
   useEffect(() => {
     refresh();
+    refreshConns();
   }, []);
+
+  async function connectDrive() {
+    setConnMsg("");
+    const r = await fetch("/api/connectors/gdrive/auth");
+    const data = await r.json().catch(() => ({}));
+    if (r.ok) window.location.href = data.url;
+    else setConnMsg(data.detail || "Drive connection failed");
+  }
+
+  async function syncConn(c) {
+    await fetch(`/api/connectors/${c.id}/sync`, { method: "POST" });
+    refreshConns();
+    setTimeout(() => {
+      refresh();
+      refreshConns();
+    }, 4000);
+  }
+
+  async function dropConn(c) {
+    await fetch(`/api/connectors/${c.id}`, { method: "DELETE" });
+    refreshConns();
+  }
 
   useEffect(() => {
     if (!docs.some((d) => POLLING_STATES.includes(d.status))) return;
@@ -131,15 +220,57 @@ export default function Documents() {
           <p className="stat-value">{totalBytes ? fmtSize(totalBytes) : "0 KB"}</p>
           <p className="micro" style={{ marginTop: 6 }}>encrypted at rest</p>
         </div>
-        <div className="stat" style={{ display: "flex", gap: 14, alignItems: "center" }}>
-          <span className="conn-icon">{ICONS.s3}</span>
-          <span className="conn-icon">{ICONS.drive}</span>
-          <div>
-            <p className="micro" style={{ color: "var(--limestone)" }}>S3 · Google Drive</p>
-            <p className="micro">connectors coming soon</p>
-          </div>
-        </div>
+        {[
+          ["s3", "Amazon S3"],
+          ["drive", "Google Drive"],
+        ].map(([kind, title]) => {
+          const conn = conns.find((c) => c.kind === (kind === "drive" ? "gdrive" : kind));
+          return (
+            <div className="stat" key={kind} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+              <span className="conn-icon">{ICONS[kind]}</span>
+              <div style={{ minWidth: 0 }}>
+                <p className="micro" style={{ color: "var(--limestone)", display: "flex", gap: 6, alignItems: "center" }}>
+                  {title}
+                  {conn && <span className="badge ok">connected</span>}
+                </p>
+                {conn ? (
+                  <>
+                    <p className="micro" style={{ overflowWrap: "anywhere" }}>
+                      {conn.label}
+                      {conn.last_result && ` — ${conn.last_result}`}
+                    </p>
+                    <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                      <button className="btn-ghost-square" style={{ padding: "2px 8px", fontSize: 12 }} onClick={() => syncConn(conn)}>
+                        Sync now
+                      </button>
+                      <button className="link-quiet" onClick={() => dropConn(conn)}>disconnect</button>
+                    </div>
+                  </>
+                ) : (
+                  <button
+                    className="btn-ghost-square"
+                    style={{ padding: "2px 8px", fontSize: 12, marginTop: 6 }}
+                    onClick={() => (kind === "s3" ? setShowS3Form(true) : connectDrive())}
+                  >
+                    Connect
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
+
+      {connMsg && <p className="error" style={{ marginBottom: 16 }}>{connMsg}</p>}
+      {showS3Form && (
+        <S3Form
+          onDone={() => {
+            setShowS3Form(false);
+            refreshConns();
+          }}
+          onCancel={() => setShowS3Form(false)}
+        />
+      )}
 
       <div style={{ display: "flex", gap: 32, alignItems: "flex-start", paddingBottom: 80 }}>
         <section style={{ flex: "1 1 480px", minWidth: 0 }}>

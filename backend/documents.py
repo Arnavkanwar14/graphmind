@@ -117,6 +117,14 @@ async def upload(
     data = b"".join(parts)
     if not data:
         raise HTTPException(400, "file is empty")
+    doc_id, duplicate = ingest_bytes(user, file.filename, data)
+    if not duplicate:
+        background.add_task(process_document, doc_id, user["id"])
+    return {"id": doc_id, "duplicate": duplicate}
+
+
+def ingest_bytes(user: dict, filename: str, data: bytes):
+    """Store an encrypted document; returns (doc_id, duplicate). Caller processes."""
     sha = hashlib.sha256(data).hexdigest()
     encrypted = user_fernet(user["enc_key"]).encrypt(data)
     with db.connect() as conn:
@@ -125,12 +133,12 @@ async def upload(
             (user["id"], sha),
         ).fetchone()
         if dup:
-            return {"id": dup[0], "duplicate": True}
+            return dup[0], True
         try:
             row = conn.execute(
                 "INSERT INTO documents (user_id, filename, size, sha256, blob_encrypted)"
                 " VALUES (%s, %s, %s, %s, %s) RETURNING id",
-                (user["id"], file.filename, len(data), sha, encrypted),
+                (user["id"], filename, len(data), sha, encrypted),
             ).fetchone()
         except errors.UniqueViolation:
             conn.rollback()
@@ -138,9 +146,8 @@ async def upload(
                 "SELECT id FROM documents WHERE user_id = %s AND sha256 = %s",
                 (user["id"], sha),
             ).fetchone()
-            return {"id": dup[0], "duplicate": True}
-    background.add_task(process_document, row[0], user["id"])
-    return {"id": row[0], "duplicate": False}
+            return dup[0], True
+    return row[0], False
 
 
 @router.get("")
