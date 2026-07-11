@@ -11,6 +11,21 @@ MODEL = "llama-3.3-70b-versatile"
 BATCH = 5
 TYPES = {"person", "org", "product", "concept", "place"}
 
+# ponytail: in-memory per-user daily Groq budget; single instance, resets on
+# restart — swap for a DB counter if this ever scales past one dyno
+DAILY_GROQ_CALLS = 400
+_budget: dict = {}
+
+
+def check_budget(user_id: int, calls: int = 1):
+    import datetime
+
+    key = (user_id, datetime.date.today().isoformat())
+    used = _budget.get(key, 0)
+    if used + calls > DAILY_GROQ_CALLS:
+        raise RuntimeError("daily AI budget reached — try again tomorrow")
+    _budget[key] = used + calls
+
 _PUNCT = re.compile(r"[^\w\s-]")
 _SUFFIX = re.compile(r"\s+(inc|llc|corp|ltd|co)$")
 
@@ -90,6 +105,7 @@ def extract_document(doc_id: int, user_id: int):
     done = 0
     for i in range(0, len(chunks), BATCH):
         batch = chunks[i : i + BATCH]
+        check_budget(user_id)
         data = _call_groq(client, title, batch)
         with db.connect() as conn:
             ids = {}

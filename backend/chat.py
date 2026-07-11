@@ -4,9 +4,11 @@ import time
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from fastapi import HTTPException
+
 from . import db
 from .auth import current_user
-from .graphbuild import MODEL, norm
+from .graphbuild import MODEL, check_budget, norm
 
 router = APIRouter(prefix="/api/chat")
 
@@ -145,6 +147,10 @@ def chat(body: ChatIn, user: dict = Depends(current_user)):
             messages.append({"role": m["role"], "content": str(m["content"])[:1500]})
     messages.append({"role": "user", "content": question})
 
+    try:
+        check_budget(user["id"])
+    except RuntimeError as e:
+        raise HTTPException(429, str(e))
     answer = _ask_groq(messages)
     return {
         "answer": answer,

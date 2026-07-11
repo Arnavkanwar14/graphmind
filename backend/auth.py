@@ -14,6 +14,22 @@ router = APIRouter(prefix="/api/auth")
 
 COOKIE = "session"
 
+# ponytail: in-memory per-IP throttle; single instance, resets on restart
+_attempts: dict = {}
+RATE_MAX, RATE_WINDOW = 10, 300  # attempts per seconds
+
+
+def _throttle(request: Request):
+    import time
+
+    ip = request.client.host if request.client else "?"
+    now = time.time()
+    recent = [t for t in _attempts.get(ip, []) if now - t < RATE_WINDOW]
+    if len(recent) >= RATE_MAX:
+        raise HTTPException(429, "too many attempts — wait a few minutes")
+    recent.append(now)
+    _attempts[ip] = recent
+
 
 def _hash_pw(pw: str) -> str:
     salt = secrets.token_bytes(16)
@@ -63,7 +79,8 @@ def current_user(request: Request) -> dict:
 
 
 @router.post("/signup")
-def signup(creds: Credentials, resp: Response):
+def signup(creds: Credentials, resp: Response, request: Request):
+    _throttle(request)
     email = creds.email.strip().lower()
     if "@" not in email or not 8 <= len(creds.password) <= 256:
         raise HTTPException(400, "valid email and password of 8-256 characters required")
@@ -85,7 +102,8 @@ def signup(creds: Credentials, resp: Response):
 
 
 @router.post("/login")
-def login(creds: Credentials, resp: Response):
+def login(creds: Credentials, resp: Response, request: Request):
+    _throttle(request)
     email = creds.email.strip().lower()
     if len(creds.password) > 256:
         raise HTTPException(401, "wrong email or password")
