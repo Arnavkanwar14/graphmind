@@ -67,10 +67,7 @@ export default function Auth({ onLogin }) {
       </div>
 
       <div className="hero-bg" style={{ flex: 1 }}>
-        <nav
-          className="nav"
-          style={{ background: "transparent", backdropFilter: "none" }}
-        >
+        <nav className="nav">
           <span className="logo">
             <LogoMark />
             GraphMind
@@ -117,26 +114,6 @@ export default function Auth({ onLogin }) {
             <p className="micro rise" style={{ marginTop: 28, animationDelay: "0.24s" }}>
               Encrypted at rest · your data never trains anyone's model
             </p>
-            <div className="rise" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 32, maxWidth: 400, animationDelay: "0.32s" }}>
-              {[
-                "M8 11V3M4.5 6.5 8 3l3.5 3.5M2.5 13.5h11", // upload
-                "M4 3h5l3 3v7H4zM9 3v3h3", // file
-                "M2 8c0-2 2.7-3.5 6-3.5S14 6 14 8s-2.7 3.5-6 3.5S2 10 2 8Z", // s3-ish
-                "M2 12.5 6 5h4l4 7.5H2Z", // drive
-                "M4 12 8 4l4 8Zm4-8v0", // graph tri
-                "M3 13V8m5 5V3m5 10V6", // chart
-                "M3 8h10M8 3v10", // plus
-                "M5 7V5a3 3 0 0 1 6 0v2m-7 0h8v6H4z", // lock
-                "M7 7m-4 0a4 4 0 1 0 8 0 4 4 0 1 0-8 0M10 10l3.5 3.5", // search
-                "M3 4h10v7H6l-3 3z", // chat
-              ].map((d, i) => (
-                <span className="bubble" key={i} style={{ animationDelay: `${i * 40}ms` }}>
-                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2">
-                    <path d={d} />
-                  </svg>
-                </span>
-              ))}
-            </div>
           </section>
 
           <section className="rise" style={{ flex: "0 1 400px", minWidth: 320, animationDelay: "0.2s" }}>
