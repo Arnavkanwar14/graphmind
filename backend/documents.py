@@ -35,14 +35,19 @@ def _chunk(pieces: list[tuple[int | None, str]]) -> list[tuple[int | None, str]]
     """Split into ~CHUNK_CHARS chunks on paragraph boundaries, keeping page numbers."""
     out = []
     for page_no, text in pieces:
+        # CRLF files never contain a literal "\n\n" — normalize before splitting
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
         buf = ""
         for para in text.split("\n\n"):
             para = para.strip()
             if not para:
                 continue
-            while len(para) > CHUNK_CHARS:  # hard-split oversized paragraphs
-                out.append((page_no, para[:CHUNK_CHARS]))
-                para = para[CHUNK_CHARS:]
+            while len(para) > CHUNK_CHARS:  # hard-split oversized paragraphs at a word boundary
+                cut = para.rfind(" ", CHUNK_CHARS - 200, CHUNK_CHARS)
+                if cut < 1:
+                    cut = CHUNK_CHARS
+                out.append((page_no, para[:cut]))
+                para = para[cut:].lstrip()
             if len(buf) + len(para) + 2 > CHUNK_CHARS:
                 if buf:
                     out.append((page_no, buf))
