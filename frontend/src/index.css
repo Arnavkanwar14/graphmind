@@ -256,6 +256,105 @@ body {
   animation: rise 0.4s var(--ease) forwards;
 }
 
+/* respect the OS motion preference: shrink everything to a near-instant fade */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* form/panel drop-in from above (S3 connect form) */
+.slide-down {
+  animation: slide-down 0.3s var(--ease) both;
+  transform-origin: top;
+}
+
+@keyframes slide-down {
+  from { opacity: 0; transform: scaleY(0.92) translateY(-8px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* panel slide-in from the right (Graph detail, entity inspector) */
+.panel-slide {
+  animation: panel-slide 0.35s var(--ease) both;
+}
+
+@keyframes panel-slide {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* animated expand/collapse via grid-template-rows interpolation - no JS height measuring */
+.expand {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.3s var(--ease);
+}
+
+.expand.open {
+  grid-template-rows: 1fr;
+}
+
+.expand > div {
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* row removal: collapse + fade before unmount */
+.row-exit {
+  animation: row-exit 0.25s var(--ease) forwards;
+}
+
+@keyframes row-exit {
+  from { opacity: 1; transform: scale(1); max-height: 80px; margin-bottom: 8px; }
+  to { opacity: 0; transform: scale(0.97); max-height: 0; margin-bottom: 0; padding-top: 0; padding-bottom: 0; }
+}
+
+/* brief highlight flash for a newly-arrived item (chat answer, new connection) */
+.flash-in {
+  animation: flash-in 1.1s var(--ease);
+}
+
+@keyframes flash-in {
+  0% { background-color: rgba(24, 88, 73, 0.28); }
+  100% { background-color: transparent; }
+}
+
+/* small floating tooltip for chart hovers */
+.chart-tip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--void);
+  border: 1px solid var(--rim);
+  color: var(--parchment);
+  font-family: var(--grotesk);
+  font-size: 12px;
+  padding: 5px 9px;
+  white-space: nowrap;
+  transform: translate(-50%, -130%);
+  opacity: 0;
+  transition: opacity 0.15s var(--ease), transform 0.15s var(--ease);
+  z-index: 5;
+}
+
+.chart-tip.show {
+  opacity: 1;
+  transform: translate(-50%, -145%);
+}
+
+/* legend items: clickable-feeling hover, dim siblings on hover via parent data attr */
+.legend-item {
+  cursor: pointer;
+  transition: opacity 0.2s var(--ease);
+  border: none;
+  background: none;
+  padding: 0;
+  font-family: var(--grotesk);
+}
+
 /* soft color glow washes inside dark panels (mp4 section visuals) */
 .glow-teal {
   background:
@@ -506,6 +605,7 @@ body {
 .input:focus {
   outline: none;
   border-color: var(--copper);
+  box-shadow: 0 0 0 3px rgba(139, 134, 127, 0.18);
 }
 
 .error {

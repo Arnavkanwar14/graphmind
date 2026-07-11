@@ -60,7 +60,7 @@ function S3Form({ onDone, onCancel }) {
   );
 
   return (
-    <form className="card" onSubmit={submit} style={{ marginBottom: 28, maxWidth: 480 }}>
+    <form className="card slide-down" onSubmit={submit} style={{ marginBottom: 28, maxWidth: 480 }}>
       <p className="eyebrow" style={{ marginBottom: 16 }}>Connect Amazon S3</p>
       {field("bucket", "Bucket name")}
       {field("region", "Region")}
@@ -88,7 +88,10 @@ export default function Documents() {
   const [conns, setConns] = useState([]);
   const [showS3Form, setShowS3Form] = useState(false);
   const [connMsg, setConnMsg] = useState("");
+  const [removingIds, setRemovingIds] = useState(new Set());
+  const [flashConnId, setFlashConnId] = useState(null);
   const fileRef = useRef();
+  const prevConnIds = useRef(null); // null = not loaded yet, so the first load never flashes
 
   async function refresh() {
     const r = await fetch("/api/documents");
@@ -97,7 +100,17 @@ export default function Documents() {
 
   async function refreshConns() {
     const r = await fetch("/api/connectors");
-    if (r.ok) setConns(await r.json());
+    if (!r.ok) return;
+    const list = await r.json();
+    if (prevConnIds.current) {
+      const newlyConnected = list.find((c) => !prevConnIds.current.has(c.id));
+      if (newlyConnected) {
+        setFlashConnId(newlyConnected.id);
+        setTimeout(() => setFlashConnId(null), 1200);
+      }
+    }
+    prevConnIds.current = new Set(list.map((c) => c.id));
+    setConns(list);
   }
 
   useEffect(() => {
@@ -166,9 +179,18 @@ export default function Documents() {
   }
 
   async function remove(doc) {
-    await fetch(`/api/documents/${doc.id}`, { method: "DELETE" });
+    setRemovingIds((s) => new Set(s).add(doc.id));
     if (preview?.doc.id === doc.id) setPreview(null);
-    refresh();
+    await fetch(`/api/documents/${doc.id}`, { method: "DELETE" });
+    // let the row-exit animation play before it actually leaves the list
+    setTimeout(() => {
+      refresh();
+      setRemovingIds((s) => {
+        const next = new Set(s);
+        next.delete(doc.id);
+        return next;
+      });
+    }, 250);
   }
 
   const totalChunks = docs.reduce((n, d) => n + d.total_chunks, 0);
@@ -231,7 +253,11 @@ export default function Documents() {
         ].map(([kind, title]) => {
           const conn = conns.find((c) => c.kind === (kind === "drive" ? "gdrive" : kind));
           return (
-            <div className="stat rise" key={kind} style={{ display: "flex", gap: 12, alignItems: "flex-start", animationDelay: kind === "drive" ? "60ms" : "0ms" }}>
+            <div
+              className={`stat rise${conn && flashConnId === conn.id ? " flash-in" : ""}`}
+              key={kind}
+              style={{ display: "flex", gap: 12, alignItems: "flex-start", animationDelay: kind === "drive" ? "60ms" : "0ms" }}
+            >
               <span className="conn-icon">{ICONS[kind]}</span>
               <div style={{ minWidth: 0 }}>
                 <p className="micro" style={{ color: "var(--limestone)", display: "flex", gap: 6, alignItems: "center" }}>
@@ -308,8 +334,8 @@ export default function Documents() {
           {docs.map((d, i) => (
             <div
               key={d.id}
-              className={`doc-row rise${d.status === "processed" ? " clickable" : ""}`}
-              style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}
+              className={`doc-row rise${d.status === "processed" ? " clickable" : ""}${removingIds.has(d.id) ? " row-exit" : ""}`}
+              style={{ animationDelay: removingIds.has(d.id) ? "0ms" : `${Math.min(i, 8) * 40}ms` }}
               onClick={() => d.status === "processed" && openPreview(d)}
             >
               <span className="filetype-chip">{d.filename.split(".").pop()}</span>
@@ -340,7 +366,8 @@ export default function Documents() {
 
         {preview && (
           <aside
-            className="card"
+            key={preview.doc.id}
+            className="card panel-slide"
             style={{ flex: "0 1 420px", maxHeight: "72vh", overflowY: "auto", position: "sticky", top: 84 }}
           >
             <div style={{ display: "flex", alignItems: "baseline", marginBottom: 16, gap: 12 }}>

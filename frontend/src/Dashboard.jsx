@@ -1,20 +1,47 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { TYPE_COLORS } from "./Graph.jsx";
 import { useCountUp, useReveal } from "./motion.js";
 
 const SINGLE = "#3fa17e"; // one hue for single-series magnitude charts
 
+/** Shared floating tooltip: positions itself over whatever element last called show(). */
+function useChartTip() {
+  const containerRef = useRef(null);
+  const [tip, setTip] = useState(null); // {x, y, text}
+
+  function show(e, text) {
+    const box = containerRef.current?.getBoundingClientRect();
+    const el = e.currentTarget.getBoundingClientRect();
+    if (!box) return;
+    setTip({ x: el.left + el.width / 2 - box.left, y: el.top - box.top, text });
+  }
+  function hide() {
+    setTip(null);
+  }
+
+  const node = (
+    <div className={`chart-tip${tip ? " show" : ""}`} style={{ left: tip?.x ?? 0, top: tip?.y ?? 0 }}>
+      {tip?.text}
+    </div>
+  );
+
+  return { containerRef, show, hide, tipNode: node };
+}
+
 function HBar({ rows, color, dot }) {
   // rows: [{label, value, type?}]; color: fixed hue or (row) => hue
   const [ref, shown] = useReveal();
+  const { containerRef, show, hide, tipNode } = useChartTip();
   const max = Math.max(...rows.map((r) => r.value), 1);
   return (
-    <div ref={ref}>
+    <div ref={(el) => { ref.current = el; containerRef.current = el; }} style={{ position: "relative" }}>
+      {tipNode}
       {rows.map((r, i) => (
         <div
           key={i}
-          title={`${r.label}: ${r.value}`}
-          style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}
+          onMouseEnter={(e) => show(e, `${r.label}: ${r.value}`)}
+          onMouseLeave={hide}
+          style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, cursor: "default" }}
         >
           <span
             className="micro"
@@ -33,8 +60,11 @@ function HBar({ rows, color, dot }) {
                 height: "100%",
                 background: typeof color === "function" ? color(r) : color,
                 borderRadius: "0 4px 4px 0",
-                transition: `width 0.7s var(--ease) ${i * 40}ms`,
+                transition: `width 0.7s var(--ease) ${i * 40}ms, filter 0.15s var(--ease)`,
+                filter: "brightness(1)",
               }}
+              onMouseEnter={(e) => { e.currentTarget.style.filter = "brightness(1.25)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.filter = "brightness(1)"; }}
             />
           </div>
           <span className="micro" style={{ width: 36, flex: "none" }}>{r.value}</span>
@@ -47,11 +77,21 @@ function HBar({ rows, color, dot }) {
 function Columns({ rows }) {
   // rows: [{day, count}] — column chart, single hue
   const [ref, shown] = useReveal();
+  const { containerRef, show, hide, tipNode } = useChartTip();
   const max = Math.max(...rows.map((r) => r.count), 1);
   return (
-    <div ref={ref} style={{ display: "flex", alignItems: "flex-end", justifyContent: rows.length < 6 ? "flex-start" : "space-between", gap: rows.length < 6 ? 20 : 6, height: 120, borderBottom: "1px solid var(--rim)", paddingBottom: 0 }}>
+    <div
+      ref={(el) => { ref.current = el; containerRef.current = el; }}
+      style={{ position: "relative", display: "flex", alignItems: "flex-end", justifyContent: rows.length < 6 ? "flex-start" : "space-between", gap: rows.length < 6 ? 20 : 6, height: 120, borderBottom: "1px solid var(--rim)", paddingBottom: 0 }}
+    >
+      {tipNode}
       {rows.map((r, i) => (
-        <div key={r.day} title={`${r.day}: ${r.count} document${r.count === 1 ? "" : "s"}`} style={{ flex: rows.length < 6 ? "0 0 auto" : 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minWidth: 20 }}>
+        <div
+          key={r.day}
+          onMouseEnter={(e) => show(e, `${r.day}: ${r.count} document${r.count === 1 ? "" : "s"}`)}
+          onMouseLeave={hide}
+          style={{ flex: rows.length < 6 ? "0 0 auto" : 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minWidth: 20 }}
+        >
           <span className="micro">{r.count}</span>
           <div
             style={{
@@ -60,8 +100,10 @@ function Columns({ rows }) {
               height: shown ? Math.max(4, (96 * r.count) / max) : 0,
               background: SINGLE,
               borderRadius: "4px 4px 0 0",
-              transition: `height 0.6s var(--ease) ${i * 50}ms`,
+              transition: `height 0.6s var(--ease) ${i * 50}ms, filter 0.15s var(--ease)`,
             }}
+            onMouseEnter={(e) => { e.currentTarget.style.filter = "brightness(1.25)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.filter = "brightness(1)"; }}
           />
           <span className="micro" style={{ fontSize: 10 }}>{r.day.slice(5)}</span>
         </div>

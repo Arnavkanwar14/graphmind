@@ -15,14 +15,23 @@ export default function Graph({ focusEntity, onFocused }) {
   const [data, setData] = useState(null);
   const [detail, setDetail] = useState(null); // {name, type, relations, sources, documents}
   const [size, setSize] = useState({ w: 800, h: 560 });
+  const [hoverType, setHoverType] = useState(null); // legend hover -> dims other types
+  const [ready, setReady] = useState(false); // fades the canvas in once positioned
   const wrapRef = useRef();
   const fgRef = useRef();
   const highlightRef = useRef(null);
+  const hoverTypeRef = useRef(null);
+  hoverTypeRef.current = hoverType;
 
   useEffect(() => {
     fetch("/api/graph")
       .then((r) => (r.ok ? r.json() : { nodes: [], links: [] }))
-      .then(setData);
+      .then((d) => {
+        setData(d);
+        // let the force layout settle a few ticks before revealing, so nodes
+        // don't visibly jump from their initial random scatter
+        setTimeout(() => setReady(true), 260);
+      });
   }, []);
 
   // arriving from chat: center on the entity, ring it, open its panel
@@ -59,7 +68,9 @@ export default function Graph({ focusEntity, onFocused }) {
   }, [data]);
 
   const drawNode = useCallback((node, ctx, scale) => {
+    const dim = hoverTypeRef.current && node.type !== hoverTypeRef.current;
     const r = 2.5 + Math.sqrt(node.degree || 1) * 1.6;
+    ctx.globalAlpha = dim ? 0.15 : 1;
     ctx.beginPath();
     ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
     ctx.fillStyle = TYPE_COLORS[node.type] || TYPE_COLORS.concept;
@@ -76,12 +87,13 @@ export default function Graph({ focusEntity, onFocused }) {
       ctx.lineWidth = 1.2;
       ctx.stroke();
     }
-    if (scale > 1.4 || (node.degree || 0) > 6) {
+    if (!dim && (scale > 1.4 || (node.degree || 0) > 6)) {
       ctx.font = `${Math.max(9 / scale, 2.4)}px "Space Grotesk", sans-serif`;
       ctx.fillStyle = "rgba(233, 235, 223, 0.85)";
       ctx.textAlign = "center";
       ctx.fillText(node.name.slice(0, 28), node.x, node.y + r + 5 / scale);
     }
+    ctx.globalAlpha = 1;
   }, []);
 
   async function onNodeClick(node) {
@@ -114,10 +126,16 @@ export default function Graph({ focusEntity, onFocused }) {
         <span className="spacer" />
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
           {Object.entries(TYPE_COLORS).map(([t, c]) => (
-            <span key={t} className="micro" style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <button
+              key={t}
+              className="legend-item micro"
+              style={{ display: "flex", alignItems: "center", gap: 5, opacity: hoverType && hoverType !== t ? 0.4 : 1 }}
+              onMouseEnter={() => setHoverType(t)}
+              onMouseLeave={() => setHoverType(null)}
+            >
               <span style={{ width: 8, height: 8, borderRadius: 9999, background: c, display: "inline-block" }} />
               {t}
-            </span>
+            </button>
           ))}
         </div>
       </div>
@@ -126,7 +144,14 @@ export default function Graph({ focusEntity, onFocused }) {
         <div
           ref={wrapRef}
           className="deep"
-          style={{ flex: 1, minWidth: 0, border: "1px solid var(--rim)", overflow: "hidden" }}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            border: "1px solid var(--rim)",
+            overflow: "hidden",
+            opacity: ready ? 1 : 0,
+            transition: "opacity 0.5s var(--ease)",
+          }}
         >
           {data && (
             <ForceGraph2D
@@ -143,7 +168,13 @@ export default function Graph({ focusEntity, onFocused }) {
                 ctx.fillStyle = color;
                 ctx.fill();
               }}
-              linkColor={(l) => (l.kind === "mention" ? "rgba(24, 88, 73, 0.35)" : "rgba(139, 134, 127, 0.35)")}
+              linkColor={(l) => {
+                const base = l.kind === "mention" ? [24, 88, 73] : [139, 134, 127];
+                const ht = hoverTypeRef.current;
+                if (!ht) return `rgba(${base.join(",")}, 0.35)`;
+                const touches = l.source?.type === ht || l.target?.type === ht;
+                return `rgba(${base.join(",")}, ${touches ? 0.55 : 0.05})`;
+              }}
               linkWidth={(l) => (l.kind === "mention" ? 0.5 : 1)}
               linkLabel={(l) => l.label}
               onNodeClick={onNodeClick}
@@ -154,7 +185,8 @@ export default function Graph({ focusEntity, onFocused }) {
 
         {detail && (
           <aside
-            className="card"
+            key={detail.name}
+            className="card panel-slide"
             style={{ flex: "0 0 340px", maxHeight: "70vh", overflowY: "auto", position: "sticky", top: 84 }}
           >
             <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 4 }}>

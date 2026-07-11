@@ -31,6 +31,7 @@ export default function Chat({ onShowEntity }) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [openCite, setOpenCite] = useState(null); // `${msgIdx}-${n}`
+  const [justArrived, setJustArrived] = useState(null); // index of a freshly-arrived answer
   const endRef = useRef();
 
   useEffect(() => {
@@ -59,12 +60,16 @@ export default function Chat({ onShowEntity }) {
         body: JSON.stringify({ message: q, history }),
       });
       const data = await r.json().catch(() => ({}));
-      setMessages((ms) => [
-        ...ms,
-        r.ok
-          ? { role: "assistant", content: data.answer, citations: data.citations, entities: data.entities }
-          : { role: "assistant", content: data.detail || "something went wrong" },
-      ]);
+      setMessages((ms) => {
+        setJustArrived(ms.length);
+        return [
+          ...ms,
+          r.ok
+            ? { role: "assistant", content: data.answer, citations: data.citations, entities: data.entities }
+            : { role: "assistant", content: data.detail || "something went wrong" },
+        ];
+      });
+      setTimeout(() => setJustArrived(null), 1200);
     } catch {
       setMessages((ms) => [
         ...ms,
@@ -94,11 +99,11 @@ export default function Chat({ onShowEntity }) {
         {messages.map((m, mi) => (
           <div key={mi} className="rise" style={{ marginBottom: 24, display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
             <div
-              className={m.role === "user" ? "card" : ""}
+              className={`${m.role === "user" ? "card" : ""}${mi === justArrived ? " flash-in" : ""}`}
               style={
                 m.role === "user"
                   ? { padding: "12px 18px", borderRadius: 8, maxWidth: "80%" }
-                  : { maxWidth: "94%", width: "100%" }
+                  : { maxWidth: "94%", width: "100%", padding: mi === justArrived ? 10 : 0 }
               }
             >
               {m.role === "assistant" && (
@@ -129,18 +134,19 @@ export default function Chat({ onShowEntity }) {
                       ) : null;
                     })()}
                   </div>
-                  {m.citations.map(
-                    (c) =>
-                      openCite === `${mi}-${c.n}` && (
-                        <div key={c.n} className="deep" style={{ border: "1px solid var(--rim)", padding: 16, marginTop: 10 }}>
+                  {m.citations.map((c) => (
+                    <div key={c.n} className={`expand${openCite === `${mi}-${c.n}` ? " open" : ""}`} style={{ marginTop: 10 }}>
+                      <div>
+                        <div className="deep" style={{ border: "1px solid var(--rim)", padding: 16 }}>
                           <p className="micro" style={{ color: "var(--copper)", marginBottom: 6 }}>
                             [{c.n}] {c.document}
                             {c.page_no != null && ` · p. ${c.page_no}`}
                           </p>
                           <p style={{ fontSize: 14, color: "var(--fog)" }}>{c.excerpt}…</p>
                         </div>
-                      )
-                  )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
 
