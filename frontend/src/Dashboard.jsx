@@ -58,9 +58,9 @@ function Columns({ rows }) {
   );
 }
 
-function Panel({ title, children }) {
+function Panel({ title, children, glow, delay = 0 }) {
   return (
-    <div className="card" style={{ flex: "1 1 340px", minWidth: 300 }}>
+    <div className={`card rise${glow ? ` ${glow}` : ""}`} style={{ flex: "1 1 340px", minWidth: 300, animationDelay: `${delay}ms` }}>
       <p className="eyebrow" style={{ marginBottom: 16 }}>{title}</p>
       {children}
     </div>
@@ -87,7 +87,7 @@ export default function Dashboard() {
 
   return (
     <>
-      <div className="page-head">
+      <div className="page-head rise">
         <div>
           <p className="eyebrow" style={{ marginBottom: 10 }}>What your knowledge base knows</p>
           <h1 className="heading-lg">Dashboard</h1>
@@ -95,8 +95,8 @@ export default function Dashboard() {
       </div>
 
       <div style={{ display: "flex", flexWrap: "wrap", marginBottom: 28 }}>
-        {tiles.map(([v, label]) => (
-          <div className="stat" key={label}>
+        {tiles.map(([v, label], i) => (
+          <div className="stat rise" key={label} style={{ animationDelay: `${60 + i * 60}ms` }}>
             <p className="stat-value">{v}</p>
             <p className="micro" style={{ marginTop: 6 }}>{label}</p>
           </div>
@@ -105,17 +105,17 @@ export default function Dashboard() {
 
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", paddingBottom: 80 }}>
         {s.by_day.length > 0 && (
-          <Panel title="Documents added · last 14 days">
+          <Panel title="Documents added · last 14 days" glow="glow-teal" delay={280}>
             <Columns rows={s.by_day} />
           </Panel>
         )}
         {s.top_docs.length > 0 && (
-          <Panel title="Chunks per document">
+          <Panel title="Chunks per document" delay={360}>
             <HBar rows={s.top_docs.map((d) => ({ label: d.name, value: d.chunks }))} color="#518dd2" />
           </Panel>
         )}
         {s.types.length > 0 && (
-          <Panel title="Entities by type">
+          <Panel title="Entities by type" delay={440}>
             <HBar
               rows={s.types.map((t) => ({ label: t.type, value: t.count, type: t.type }))}
               color={(r) => TYPE_COLORS[r.type] || SINGLE}
@@ -124,7 +124,7 @@ export default function Dashboard() {
           </Panel>
         )}
         {s.top_entities.length > 0 && (
-          <Panel title="Most connected entities">
+          <Panel title="Most connected entities" glow="glow-amber" delay={520}>
             <HBar
               rows={s.top_entities.map((e) => ({ label: e.name, value: e.degree, type: e.type }))}
               color={SINGLE}

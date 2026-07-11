@@ -138,6 +138,72 @@ body {
   to { opacity: 1; transform: none; }
 }
 
+/* arrow link — grotesk underline, arrow steps right on hover (mp4 pattern) */
+.link-arrow {
+  font-family: var(--grotesk);
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  color: var(--fog);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  transition: color 0.25s var(--ease);
+}
+
+.link-arrow::after {
+  content: " →";
+  display: inline-block;
+  transition: transform 0.25s var(--ease);
+}
+
+.link-arrow:hover {
+  color: var(--parchment);
+}
+
+.link-arrow:hover::after {
+  transform: translateX(3px);
+}
+
+/* integration icon bubbles (mp4 hero constellation) */
+.bubble {
+  width: 52px;
+  height: 52px;
+  border-radius: 9999px;
+  background: var(--raised);
+  border: 1px solid var(--rim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--limestone);
+  transition: transform 0.3s var(--ease), border-color 0.3s var(--ease), color 0.3s var(--ease);
+}
+
+.bubble svg {
+  width: 20px;
+  height: 20px;
+}
+
+.bubble:hover {
+  transform: translateY(-3px);
+  border-color: var(--copper);
+  color: var(--parchment);
+}
+
+/* soft color glow washes inside dark panels (mp4 section visuals) */
+.glow-teal {
+  background:
+    radial-gradient(80% 70% at 85% 0%, rgba(24, 88, 73, 0.35) 0%, rgba(21, 21, 21, 0) 70%),
+    var(--raised);
+}
+
+.glow-amber {
+  background:
+    radial-gradient(80% 70% at 85% 0%, rgba(74, 43, 17, 0.4) 0%, rgba(21, 21, 21, 0) 70%),
+    var(--raised);
+}
+
 /* ---------- chrome ---------- */
 
 .announce {
@@ -293,6 +359,17 @@ body {
 
 .card-hover:hover {
   border-color: var(--copper);
+}
+
+.card,
+.stat,
+.connector {
+  transition: border-color 0.25s var(--ease), background 0.25s var(--ease);
+}
+
+.card:hover,
+.connector:hover {
+  border-color: #56574f;
 }
 
 .deep {

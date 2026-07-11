@@ -142,6 +142,83 @@ def me(user: dict = Depends(current_user)):
     return {"id": user["id"], "email": user["email"]}
 
 
+def _send_reset_email(email: str, link: str):
+    key = os.environ.get("RESEND_API_KEY")
+    if not key:
+        # no email provider configured yet — surface the link in server logs
+        print(f"[password reset] {email}: {link}", flush=True)
+        return
+    import json as _json
+    import urllib.request
+
+    req = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=_json.dumps(
+            {
+                "from": os.environ.get("RESET_FROM", "GraphMind <onboarding@resend.dev>"),
+                "to": [email],
+                "subject": "Reset your GraphMind password",
+                "text": f"Someone (hopefully you) asked to reset your GraphMind password.\n\n"
+                f"Reset it here (valid 1 hour): {link}\n\nIf this wasn't you, ignore this email.",
+            }
+        ).encode(),
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+    )
+    urllib.request.urlopen(req, timeout=20)
+
+
+class ForgotIn(BaseModel):
+    email: str
+
+
+class ResetIn(BaseModel):
+    token: str
+    password: str
+
+
+@router.post("/forgot")
+def forgot(body: ForgotIn, request: Request):
+    _throttle(request)
+    email = body.email.strip().lower()
+    with db.connect() as conn:
+        row = conn.execute("SELECT id FROM users WHERE email = %s", (email,)).fetchone()
+        if row:
+            token = secrets.token_urlsafe(32)
+            conn.execute(
+                "INSERT INTO password_resets (token, user_id) VALUES (%s, %s)", (token, row[0])
+            )
+            base = str(request.base_url).rstrip("/")
+            if "onrender.com" in base:
+                base = base.replace("http://", "https://")
+            try:
+                _send_reset_email(email, f"{base}/?reset={token}")
+            except Exception:
+                pass  # never reveal delivery problems to the caller
+    return {"ok": True}  # same answer whether or not the account exists
+
+
+@router.post("/reset")
+def reset(body: ResetIn, request: Request):
+    _throttle(request)
+    if not 8 <= len(body.password) <= 256:
+        raise HTTPException(400, "password must be 8-256 characters")
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT user_id FROM password_resets WHERE token = %s"
+            " AND created_at > now() - interval '1 hour'",
+            (body.token,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(400, "reset link is invalid or expired — request a new one")
+        conn.execute(
+            "UPDATE users SET password_hash = %s WHERE id = %s",
+            (_hash_pw(body.password), row[0]),
+        )
+        conn.execute("DELETE FROM password_resets WHERE user_id = %s", (row[0],))
+        conn.execute("DELETE FROM sessions WHERE user_id = %s", (row[0],))
+    return {"ok": True}
+
+
 @router.delete("/account")
 def delete_account(resp: Response, user: dict = Depends(current_user)):
     # cascades take documents, chunks, entities, edges, sessions, connectors

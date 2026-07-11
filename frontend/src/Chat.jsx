@@ -34,6 +34,13 @@ export default function Chat({ onShowEntity }) {
   const endRef = useRef();
 
   useEffect(() => {
+    fetch("/api/chat/history")
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setMessages)
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, busy]);
 
@@ -85,7 +92,7 @@ export default function Chat({ onShowEntity }) {
         )}
 
         {messages.map((m, mi) => (
-          <div key={mi} style={{ marginBottom: 24, display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
+          <div key={mi} className="rise" style={{ marginBottom: 24, display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
             <div
               className={m.role === "user" ? "card" : ""}
               style={

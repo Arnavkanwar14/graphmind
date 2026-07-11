@@ -1,3 +1,4 @@
+import json
 import re
 import time
 
@@ -153,7 +154,7 @@ def chat(body: ChatIn, user: dict = Depends(current_user)):
     except RuntimeError as e:
         raise HTTPException(429, str(e))
     answer = _ask_groq(messages)
-    return {
+    result = {
         "answer": answer,
         "citations": [
             {
@@ -168,3 +169,31 @@ def chat(body: ChatIn, user: dict = Depends(current_user)):
         ],
         "entities": [{"id": e[0], "name": e[1]} for e in ents],
     }
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO chat_messages (user_id, role, content) VALUES (%s, 'user', %s)",
+            (user["id"], question),
+        )
+        conn.execute(
+            "INSERT INTO chat_messages (user_id, role, content, meta) VALUES (%s, 'assistant', %s, %s)",
+            (user["id"], answer, json.dumps({"citations": result["citations"], "entities": result["entities"]})),
+        )
+    return result
+
+
+@router.get("/history")
+def history(user: dict = Depends(current_user)):
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT role, content, meta FROM chat_messages WHERE user_id = %s"
+            " ORDER BY id DESC LIMIT 50",
+            (user["id"],),
+        ).fetchall()
+    out = []
+    for role, content, meta in reversed(rows):
+        m = {"role": role, "content": content}
+        if meta:
+            m["citations"] = meta.get("citations", [])
+            m["entities"] = meta.get("entities", [])
+        out.append(m)
+    return out

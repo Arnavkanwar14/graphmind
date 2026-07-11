@@ -188,7 +188,7 @@ export default function Documents() {
 
   return (
     <>
-      <div className="page-head">
+      <div className="page-head rise">
         <div>
           <p className="eyebrow" style={{ marginBottom: 10 }}>
             Your knowledge base
@@ -280,7 +280,7 @@ export default function Documents() {
       <div style={{ display: "flex", gap: 32, alignItems: "flex-start", paddingBottom: 80 }}>
         <section style={{ flex: "1 1 480px", minWidth: 0 }}>
           <div
-            className={`dropzone${drag ? " drag" : ""}`}
+            className={`dropzone rise${drag ? " drag" : ""}`}
             onClick={() => fileRef.current.click()}
             onDragOver={(e) => {
               e.preventDefault();

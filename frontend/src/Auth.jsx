@@ -8,25 +8,41 @@ const STEPS = [
 ];
 
 export default function Auth({ onLogin }) {
-  const [mode, setMode] = useState("signup");
+  const resetToken = new URLSearchParams(window.location.search).get("reset");
+  const [mode, setMode] = useState(resetToken ? "reset" : "signup");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
 
   async function submit(e) {
     e.preventDefault();
     setBusy(true);
     setError("");
+    setNotice("");
     try {
+      const body =
+        mode === "forgot"
+          ? { email }
+          : mode === "reset"
+            ? { token: resetToken, password }
+            : { email, password };
       const r = await fetch(`/api/auth/${mode}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify(body),
       });
       const data = await r.json().catch(() => ({}));
-      if (r.ok) onLogin(data);
-      else setError(data.detail || "something went wrong");
+      if (!r.ok) setError(data.detail || "something went wrong");
+      else if (mode === "forgot")
+        setNotice("If that account exists, a reset link is on its way.");
+      else if (mode === "reset") {
+        window.history.replaceState(null, "", "/");
+        setNotice("Password updated — sign in with it now.");
+        setMode("login");
+        setPassword("");
+      } else onLogin(data);
     } catch {
       setError("can't reach the server — try again in a moment");
     } finally {
@@ -34,11 +50,20 @@ export default function Auth({ onLogin }) {
     }
   }
 
+  const TITLES = {
+    signup: "Create your account",
+    login: "Welcome back",
+    forgot: "Reset your password",
+    reset: "Choose a new password",
+  };
+  const CTA = { signup: "Start for free", login: "Sign in", forgot: "Send reset link", reset: "Set new password" };
+
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <div className="announce">
         <span className="badge">Private beta</span>
         <span>GraphMind is in early access — free while we build.</span>
+        <a className="link-arrow" href="#how">How it works</a>
       </div>
 
       <div className="hero-bg" style={{ flex: 1 }}>
@@ -52,10 +77,17 @@ export default function Auth({ onLogin }) {
           </span>
           <span className="spacer" />
           <button
-            className="btn-ghost-pill"
-            onClick={() => setMode(mode === "signup" ? "login" : "signup")}
+            className="link-quiet"
+            style={{ textDecoration: "none", fontSize: 14 }}
+            onClick={() => setMode("login")}
           >
-            {mode === "signup" ? "Sign in" : "Create account"}
+            Sign in
+          </button>
+          <button className="btn-ghost-pill" onClick={() => setMode("login")}>
+            Live demo
+          </button>
+          <button className="btn-pill" style={{ padding: "8px 18px", fontSize: 14 }} onClick={() => setMode("signup")}>
+            Start for free
           </button>
         </nav>
 
@@ -85,73 +117,117 @@ export default function Auth({ onLogin }) {
             <p className="micro rise" style={{ marginTop: 28, animationDelay: "0.24s" }}>
               Encrypted at rest · your data never trains anyone's model
             </p>
+            <div className="rise" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 32, maxWidth: 400, animationDelay: "0.32s" }}>
+              {[
+                "M8 11V3M4.5 6.5 8 3l3.5 3.5M2.5 13.5h11", // upload
+                "M4 3h5l3 3v7H4zM9 3v3h3", // file
+                "M2 8c0-2 2.7-3.5 6-3.5S14 6 14 8s-2.7 3.5-6 3.5S2 10 2 8Z", // s3-ish
+                "M2 12.5 6 5h4l4 7.5H2Z", // drive
+                "M4 12 8 4l4 8Zm4-8v0", // graph tri
+                "M3 13V8m5 5V3m5 10V6", // chart
+                "M3 8h10M8 3v10", // plus
+                "M5 7V5a3 3 0 0 1 6 0v2m-7 0h8v6H4z", // lock
+                "M7 7m-4 0a4 4 0 1 0 8 0 4 4 0 1 0-8 0M10 10l3.5 3.5", // search
+                "M3 4h10v7H6l-3 3z", // chat
+              ].map((d, i) => (
+                <span className="bubble" key={i} style={{ animationDelay: `${i * 40}ms` }}>
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2">
+                    <path d={d} />
+                  </svg>
+                </span>
+              ))}
+            </div>
           </section>
 
           <section className="rise" style={{ flex: "0 1 400px", minWidth: 320, animationDelay: "0.2s" }}>
             <form className="card" onSubmit={submit} style={{ padding: 32 }}>
               <h2 className="heading-sm" style={{ marginBottom: 4 }}>
-                {mode === "signup" ? "Create your account" : "Welcome back"}
+                {TITLES[mode]}
               </h2>
               <p className="micro" style={{ marginBottom: 24 }}>
-                {mode === "signup" ? "No card. No sales call." : "Good to see you again."}
+                {mode === "signup" && "No card. No sales call."}
+                {mode === "login" && "Good to see you again."}
+                {mode === "forgot" && "We'll send a link to your email."}
+                {mode === "reset" && "Make it a good one."}
               </p>
-              <div style={{ marginBottom: 16 }}>
-                <label className="field-label" htmlFor="email">
-                  Work email
-                </label>
-                <input
-                  id="email"
-                  className="input"
-                  type="email"
-                  placeholder="you@company.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
-              </div>
-              <div style={{ marginBottom: 24 }}>
-                <label className="field-label" htmlFor="password">
-                  Password{mode === "signup" ? " · 8+ characters" : ""}
-                </label>
-                <input
-                  id="password"
-                  className="input"
-                  type="password"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  minLength={mode === "signup" ? 8 : undefined}
-                  required
-                />
-              </div>
+              {mode !== "reset" && (
+                <div style={{ marginBottom: 16 }}>
+                  <label className="field-label" htmlFor="email">
+                    Work email
+                  </label>
+                  <input
+                    id="email"
+                    className="input"
+                    type="email"
+                    placeholder="you@company.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                  />
+                </div>
+              )}
+              {mode !== "forgot" && (
+                <div style={{ marginBottom: 24 }}>
+                  <label className="field-label" htmlFor="password">
+                    {mode === "reset" ? "New password · 8+ characters" : `Password${mode === "signup" ? " · 8+ characters" : ""}`}
+                  </label>
+                  <input
+                    id="password"
+                    className="input"
+                    type="password"
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    minLength={mode === "login" ? undefined : 8}
+                    required
+                  />
+                </div>
+              )}
               {error && (
                 <p className="error" style={{ marginBottom: 16 }}>
                   {error}
                 </p>
               )}
+              {notice && (
+                <p className="micro" style={{ marginBottom: 16, color: "var(--forest)", fontSize: 13 }}>
+                  {notice}
+                </p>
+              )}
               <button className="btn-pill" style={{ width: "100%" }} disabled={busy}>
-                {busy ? "…" : mode === "signup" ? "Start for free" : "Sign in"}
+                {busy ? "…" : CTA[mode]}
               </button>
-              <p style={{ marginTop: 20, textAlign: "center" }}>
+              <p style={{ marginTop: 20, textAlign: "center", display: "flex", gap: 16, justifyContent: "center" }}>
                 <button
                   type="button"
                   className="link-quiet"
                   onClick={() => {
                     setMode(mode === "signup" ? "login" : "signup");
                     setError("");
+                    setNotice("");
                   }}
                 >
-                  {mode === "signup"
-                    ? "Already have an account? Sign in"
-                    : "New here? Create an account"}
+                  {mode === "signup" ? "Already have an account? Sign in" : "New here? Create an account"}
                 </button>
+                {mode === "login" && (
+                  <button
+                    type="button"
+                    className="link-quiet"
+                    onClick={() => {
+                      setMode("forgot");
+                      setError("");
+                      setNotice("");
+                    }}
+                  >
+                    Forgot password?
+                  </button>
+                )}
               </p>
             </form>
           </section>
         </main>
       </div>
 
-      <section className="steps">
+      <section className="steps" id="how">
         <div className="page" style={{ display: "flex", flexWrap: "wrap", padding: 0 }}>
           {STEPS.map(([no, title, body]) => (
             <div className="step" key={no}>

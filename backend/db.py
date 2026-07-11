@@ -60,6 +60,20 @@ CREATE TABLE IF NOT EXISTS edges (
 CREATE INDEX IF NOT EXISTS edges_user_idx ON edges (user_id);
 CREATE INDEX IF NOT EXISTS edges_a_idx ON edges (a_entity);
 CREATE INDEX IF NOT EXISTS edges_b_idx ON edges (b_entity);
+CREATE TABLE IF NOT EXISTS password_resets (
+    token TEXT PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    meta JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS chat_user_idx ON chat_messages (user_id, id);
 CREATE TABLE IF NOT EXISTS connectors (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

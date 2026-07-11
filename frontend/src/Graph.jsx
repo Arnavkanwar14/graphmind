@@ -104,7 +104,7 @@ export default function Graph({ focusEntity, onFocused }) {
 
   return (
     <>
-      <div className="page-head" style={{ paddingBottom: 20 }}>
+      <div className="page-head rise" style={{ paddingBottom: 20 }}>
         <div>
           <p className="eyebrow" style={{ marginBottom: 10 }}>
             {data ? `${data.nodes.length} nodes · ${data.links.length} edges` : "loading"}
