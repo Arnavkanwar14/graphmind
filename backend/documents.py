@@ -65,20 +65,31 @@ def _chunk(pieces: list[tuple[int | None, str]]) -> list[tuple[int | None, str]]
 def process_document(doc_id: int, user_id: int):
     try:
         with db.connect() as conn:
-            row = conn.execute(
-                "SELECT d.filename, d.blob_encrypted, u.enc_key FROM documents d"
-                " JOIN users u ON u.id = d.user_id WHERE d.id = %s AND d.user_id = %s",
+            # Atomic claim: only one worker may ever process a document. A second
+            # concurrent call (double-queued task, racing retry, stray script)
+            # matches 0 rows here and exits instead of clobbering the winner's
+            # chunks mid-extraction (2026-07-12 double-run incident).
+            claimed = conn.execute(
+                "UPDATE documents SET status = 'extracting'"
+                " WHERE id = %s AND user_id = %s AND status = 'uploaded' RETURNING id",
                 (doc_id, user_id),
             ).fetchone()
-            if not row:
+            if not claimed:
                 return
+            row = conn.execute(
+                "SELECT d.filename, d.blob_encrypted, u.enc_key FROM documents d"
+                " JOIN users u ON u.id = d.user_id WHERE d.id = %s",
+                (doc_id,),
+            ).fetchone()
             filename, blob, wrapped_key = row
             data = user_fernet(wrapped_key).decrypt(bytes(blob))
             chunks = _chunk(_extract(filename, data))
             if not chunks:
                 raise ValueError("no extractable text found")
+            # defensive: clear leftovers from any crashed earlier attempt
+            conn.execute("DELETE FROM chunks WHERE document_id = %s", (doc_id,))
             conn.execute(
-                "UPDATE documents SET status = 'extracting', total_chunks = %s WHERE id = %s",
+                "UPDATE documents SET total_chunks = %s WHERE id = %s",
                 (len(chunks), doc_id),
             )
             with conn.cursor() as cur:
@@ -144,14 +155,16 @@ def ingest_bytes(user: dict, filename: str, data: bytes):
         if dup:
             if dup[1] != "failed":
                 return dup[0], True
-            # re-uploading a failed doc = retry: clear partial state, reprocess
-            conn.execute("DELETE FROM chunks WHERE document_id = %s", (dup[0],))
-            conn.execute(
+            # re-uploading a failed doc = retry. Status-guarded so two concurrent
+            # retries can't both requeue it (the loser sees 0 rows and treats it
+            # as a duplicate) — double-processing clobbers chunks (2026-07-12).
+            requeued = conn.execute(
                 "UPDATE documents SET status = 'uploaded', error = NULL,"
-                " total_chunks = 0, processed_chunks = 0 WHERE id = %s",
+                " total_chunks = 0, processed_chunks = 0"
+                " WHERE id = %s AND status = 'failed' RETURNING id",
                 (dup[0],),
-            )
-            return dup[0], False
+            ).fetchone()
+            return dup[0], requeued is None
         try:
             row = conn.execute(
                 "INSERT INTO documents (user_id, filename, size, sha256, blob_encrypted)"
