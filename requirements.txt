@@ -7,3 +7,4 @@ python-multipart
 psycopg_pool
 groq
 boto3
+google-genai

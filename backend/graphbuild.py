@@ -60,30 +60,66 @@ def norm(name: str) -> str:
     return re.sub(r"\s+", " ", n).strip()
 
 
-def _call_groq(client, doc_title: str, batch):
+GEMINI_MODEL = "gemini-flash-latest"
+
+
+def _is_rate_limit(e) -> bool:
+    msg = str(e).lower()
+    return "rate" in msg or "429" in msg or "503" in msg or "resource_exhausted" in msg
+
+
+def _extract_groq(groq_client, prompt: str):
+    resp = groq_client.chat.completions.create(
+        model=MODEL,
+        temperature=0,
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": SYS},
+            {"role": "user", "content": prompt},
+        ],
+    )
+    return json.loads(resp.choices[0].message.content)
+
+
+def _extract_gemini(gemini_client, prompt: str):
+    resp = gemini_client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=f"{SYS}\n\n{prompt}",
+        config={"temperature": 0, "response_mime_type": "application/json"},
+    )
+    return json.loads(resp.text)
+
+
+def _call_llm(groq_client, gemini_client, doc_title: str, batch):
+    """Extract from a chunk batch. Groq first; on rate-limit, fall over to Gemini
+    (2026-07-12) so a bulk backlog isn't stalled waiting out one provider's limit."""
     numbered = "\n\n".join(f"[chunk {i}]\n{text[:1400]}" for i, (_, text) in enumerate(batch))
+    prompt = f'Document: "{doc_title}"\n\n{numbered}'
     with _groq_lock:  # one extraction call in flight at a time, app-wide
-        for attempt in range(5):
+        for attempt in range(2):
             try:
-                resp = client.chat.completions.create(
-                    model=MODEL,
-                    temperature=0,
-                    response_format={"type": "json_object"},
-                    messages=[
-                        {"role": "system", "content": SYS},
-                        {"role": "user", "content": f'Document: "{doc_title}"\n\n{numbered}'},
-                    ],
-                )
-                data = json.loads(resp.choices[0].message.content)
+                data = _extract_groq(groq_client, prompt)
                 time.sleep(0.6)  # pace successful calls under the free-tier RPM cap
                 return data
             except Exception as e:
-                msg = str(e).lower()
-                if "rate" in msg or "429" in msg or "503" in msg:
-                    time.sleep(12 * (attempt + 1))
+                if _is_rate_limit(e) and attempt == 0:
+                    time.sleep(6)
                     continue
-                raise
-        raise RuntimeError("Groq rate limit persisted after retries")
+                if not _is_rate_limit(e):
+                    raise
+                break  # Groq still limited — try the other provider
+        if gemini_client is not None:
+            for attempt in range(3):
+                try:
+                    data = _extract_gemini(gemini_client, prompt)
+                    time.sleep(0.6)
+                    return data
+                except Exception as e:
+                    if _is_rate_limit(e) and attempt < 2:
+                        time.sleep(8 * (attempt + 1))
+                        continue
+                    raise
+    raise RuntimeError("both Groq and Gemini rate limits persisted after retries")
 
 
 def _upsert_entity(conn, user_id, name, typ):
@@ -106,6 +142,14 @@ def extract_document(doc_id: int, user_id: int):
     from groq import Groq
 
     client = Groq()
+    gemini_client = None
+    if os.environ.get("GEMINI_API_KEY"):
+        try:
+            from google import genai
+
+            gemini_client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+        except Exception:
+            gemini_client = None
     with db.connect() as conn:
         title_row = conn.execute(
             "SELECT filename FROM documents WHERE id = %s AND user_id = %s", (doc_id, user_id)
@@ -121,7 +165,7 @@ def extract_document(doc_id: int, user_id: int):
     for i in range(0, len(chunks), BATCH):
         batch = chunks[i : i + BATCH]
         check_budget(user_id)
-        data = _call_groq(client, title, batch)
+        data = _call_llm(client, gemini_client, title, batch)
         with db.connect() as conn:
             ids = {}
             for ent in data.get("entities", [])[:20]:
