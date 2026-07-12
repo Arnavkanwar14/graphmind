@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import threading
 import time
 
 from . import db
@@ -10,6 +11,14 @@ from . import db
 MODEL = "llama-3.3-70b-versatile"
 BATCH = 5
 TYPES = {"person", "org", "product", "concept", "place"}
+
+# ponytail: process-wide lock, not per-user — with many documents uploaded at
+# once, concurrent background tasks were each hitting Groq's rate limit and
+# retrying independently, turning a brief limit into a sustained stampede that
+# never let the window clear (282/411 docs failed in one bulk-upload test).
+# Serializing calls is slower per-document but the only thing that reliably
+# drains a large backlog on a free-tier rate limit.
+_groq_lock = threading.Lock()
 
 # ponytail: in-memory per-user daily Groq budget; single instance, resets on
 # restart — swap for a DB counter if this ever scales past one dyno
@@ -53,25 +62,28 @@ def norm(name: str) -> str:
 
 def _call_groq(client, doc_title: str, batch):
     numbered = "\n\n".join(f"[chunk {i}]\n{text[:1400]}" for i, (_, text) in enumerate(batch))
-    for attempt in range(5):
-        try:
-            resp = client.chat.completions.create(
-                model=MODEL,
-                temperature=0,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": SYS},
-                    {"role": "user", "content": f'Document: "{doc_title}"\n\n{numbered}'},
-                ],
-            )
-            return json.loads(resp.choices[0].message.content)
-        except Exception as e:
-            msg = str(e).lower()
-            if "rate" in msg or "429" in msg or "503" in msg:
-                time.sleep(12 * (attempt + 1))
-                continue
-            raise
-    raise RuntimeError("Groq rate limit persisted after retries")
+    with _groq_lock:  # one extraction call in flight at a time, app-wide
+        for attempt in range(5):
+            try:
+                resp = client.chat.completions.create(
+                    model=MODEL,
+                    temperature=0,
+                    response_format={"type": "json_object"},
+                    messages=[
+                        {"role": "system", "content": SYS},
+                        {"role": "user", "content": f'Document: "{doc_title}"\n\n{numbered}'},
+                    ],
+                )
+                data = json.loads(resp.choices[0].message.content)
+                time.sleep(0.6)  # pace successful calls under the free-tier RPM cap
+                return data
+            except Exception as e:
+                msg = str(e).lower()
+                if "rate" in msg or "429" in msg or "503" in msg:
+                    time.sleep(12 * (attempt + 1))
+                    continue
+                raise
+        raise RuntimeError("Groq rate limit persisted after retries")
 
 
 def _upsert_entity(conn, user_id, name, typ):
