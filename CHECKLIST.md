@@ -6,6 +6,31 @@ delete the line (keeps a record of what shipped).
 
 Live: https://graphmind-r439.onrender.com · Working dir: `C:\Users\bifro\OneDrive\Desktop\graphmind`
 
+## 0. Performance — end-user load times (done 2026-07-13)
+
+Profiling finding: on remote Neon each query is only a few ms of server-side
+work but ~250ms of network round-trip latency, and the connection pool's
+`check=ConnectionPool.check_connection` (required — it prevents the
+Neon-drops-a-connection crash, proven by reproduction) adds one ~236ms health
+round trip per checkout. So page load time was dominated by the *number* of
+sequential round trips, not by SQL. Fixes (all output verified byte-identical
+to the old path; zero LLM API calls added):
+
+- [x] `/api/graph`: 4 serial queries → 1 json_agg round trip. ~1831ms → ~900ms.
+- [x] `/api/stats` (dashboard): 5 → 1. ~1880ms → ~943ms.
+- [x] `/api/graph/entity/{id}` (fires on every graph-node click): 4 → 1. ~1s → ~900ms.
+- [x] `/api/documents/{id}/chunks` (doc preview): 2 → 1.
+- [x] Frontend tabs (App.jsx): were unmounted/remounted on every switch, re-fetching
+  and re-running the whole force simulation each visit. Now mount lazily on first
+  visit and stay mounted (hidden via display:none) — revisits are instant and each
+  read endpoint is fetched once per session, not per navigation. Verified live in
+  the browser: fresh load fetches only the active tab, revisits add zero requests.
+- Remaining floor (not worth chasing on free tier): the ~236ms/checkout health
+  check + ~250ms/query Neon latency are inherent to a remote free-tier DB. Chat
+  latency is dominated by the Groq call (seconds), not DB. Extraction speed is
+  bottlenecked on LLM free-tier rate limits — can't push harder without crowding
+  the APIs or moving to a paid tier.
+
 ## 1. Extraction pipeline reliability (in progress, 2026-07-13)
 
 - [x] Groq stampede fix: process-wide `_groq_lock` serializes all extraction calls (`backend/graphbuild.py`)
