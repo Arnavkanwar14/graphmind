@@ -1,5 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import ForceGraph2D from "react-force-graph-2d";
+import {
+  forceSimulation,
+  forceManyBody,
+  forceLink,
+  forceCollide,
+  forceX,
+  forceY,
+} from "d3-force-3d";
 
 // categorical palette validated against the dark surface (dataviz six checks)
 export const TYPE_COLORS = {
@@ -10,6 +18,40 @@ export const TYPE_COLORS = {
   place: "#b07f36",
   document: "#185849",
 };
+
+// Lay the graph out ONCE, synchronously, before it's ever rendered — instead of
+// letting react-force-graph animate it. Its runtime simulation left the nodes
+// frozen in a rigid phyllotaxis circle (it rebuilds its own forces on mount, and
+// the only override hook depends on an animation loop that browsers throttle when
+// the tab isn't focused). Precomputing positions here is deterministic: strong
+// range-capped repulsion spreads clusters apart, links pull related nodes
+// together, and mild x/y gravity keeps it centered — the organic Obsidian look,
+// identical in every browser. Mutates graph.nodes in place (adds x/y).
+function computeLayout(graph) {
+  // run on copies of the links so the originals keep their string source/target
+  // ids for react-force-graph (d3's forceLink rewrites them to node objects).
+  // Drop links whose endpoints aren't in the node set — the graph can contain a
+  // mention edge to a failed document that isn't rendered as a node; react-force-
+  // graph tolerates that dangling link but d3's forceLink throws on it.
+  const ids = new Set(graph.nodes.map((n) => n.id));
+  const links = graph.links
+    .filter((l) => ids.has(l.source) && ids.has(l.target))
+    .map((l) => ({ source: l.source, target: l.target, kind: l.kind }));
+  const sim = forceSimulation(graph.nodes, 2)
+    .force("charge", forceManyBody().strength(-170).distanceMax(420))
+    .force(
+      "link",
+      forceLink(links)
+        .id((n) => n.id)
+        .distance((l) => (l.kind === "mention" ? 30 : 58))
+        .strength(0.22),
+    )
+    .force("collide", forceCollide(7))
+    .force("x", forceX().strength(0.045))
+    .force("y", forceY().strength(0.045))
+    .stop();
+  for (let i = 0; i < 320; i++) sim.tick();
+}
 
 export default function Graph({ focusEntity, onFocused }) {
   const [data, setData] = useState(null);
@@ -27,10 +69,14 @@ export default function Graph({ focusEntity, onFocused }) {
     fetch("/api/graph")
       .then((r) => (r.ok ? r.json() : { nodes: [], links: [] }))
       .then((d) => {
+        // position the nodes up front so the graph renders already settled
+        try {
+          if (d.nodes.length) computeLayout(d);
+        } catch (e) {
+          console.error("computeLayout failed:", e);
+        }
         setData(d);
-        // let the force layout settle a few ticks before revealing, so nodes
-        // don't visibly jump from their initial random scatter
-        setTimeout(() => setReady(true), 260);
+        setTimeout(() => setReady(true), 60);
       });
   }, []);
 
@@ -180,7 +226,8 @@ export default function Graph({ focusEntity, onFocused }) {
               linkWidth={(l) => (l.kind === "mention" ? 0.5 : 1)}
               linkLabel={(l) => l.label}
               onNodeClick={onNodeClick}
-              cooldownTicks={120}
+              warmupTicks={0}
+              cooldownTicks={0}
             />
           )}
         </div>
