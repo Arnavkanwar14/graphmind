@@ -10,40 +10,41 @@ NODE_CAP = 500
 
 @router.get("")
 def graph(user: dict = Depends(current_user)):
+    # One round trip, not four: over remote Neon each query is ~3ms of work but
+    # ~250ms of network latency, so four sequential queries cost ~1.8s of pure
+    # waiting. Bundling them as four json_agg subqueries returns the whole graph
+    # in a single trip while Postgres still runs each part server-side.
     with db.connect() as conn:
-        entities = conn.execute(
-            "SELECT e.id, e.display_name, e.type,"
-            " (SELECT count(*) FROM edges x WHERE x.a_entity = e.id OR x.b_entity = e.id) deg"
-            " FROM entities e WHERE e.user_id = %s ORDER BY deg DESC LIMIT %s",
-            (user["id"], NODE_CAP),
-        ).fetchall()
-        included = {r[0] for r in entities}
-        docs = conn.execute(
-            "SELECT id, filename FROM documents WHERE user_id = %s AND status != 'failed'",
-            (user["id"],),
-        ).fetchall()
-        relations = conn.execute(
-            "SELECT a_entity, b_entity, min(label) FROM edges"
-            " WHERE user_id = %s AND kind = 'relation' GROUP BY a_entity, b_entity",
-            (user["id"],),
-        ).fetchall()
-        mentions = conn.execute(
-            "SELECT DISTINCT a_entity, document_id FROM edges"
-            " WHERE user_id = %s AND kind = 'mention'",
-            (user["id"],),
-        ).fetchall()
+        entities, docs, relations, mentions = conn.execute(
+            "SELECT"
+            " coalesce((SELECT json_agg(t) FROM (SELECT e.id, e.display_name, e.type,"
+            "   (SELECT count(*) FROM edges x WHERE x.a_entity = e.id OR x.b_entity = e.id) deg"
+            "   FROM entities e WHERE e.user_id = %(u)s ORDER BY deg DESC LIMIT %(cap)s) t), '[]'),"
+            " coalesce((SELECT json_agg(t) FROM (SELECT id, filename FROM documents"
+            "   WHERE user_id = %(u)s AND status != 'failed') t), '[]'),"
+            " coalesce((SELECT json_agg(t) FROM (SELECT a_entity, b_entity, min(label) label FROM edges"
+            "   WHERE user_id = %(u)s AND kind = 'relation' GROUP BY a_entity, b_entity) t), '[]'),"
+            " coalesce((SELECT json_agg(t) FROM (SELECT DISTINCT a_entity, document_id FROM edges"
+            "   WHERE user_id = %(u)s AND kind = 'mention') t), '[]')",
+            {"u": user["id"], "cap": NODE_CAP},
+        ).fetchone()
 
+    included = {r["id"] for r in entities}
     nodes = [
-        {"id": f"e{r[0]}", "name": r[1], "type": r[2], "degree": r[3]} for r in entities
-    ] + [{"id": f"d{r[0]}", "name": r[1], "type": "document", "degree": 1} for r in docs]
-    links = [
-        {"source": f"e{a}", "target": f"e{b}", "label": lbl, "kind": "relation"}
-        for a, b, lbl in relations
-        if a in included and b in included
+        {"id": f"e{r['id']}", "name": r["display_name"], "type": r["type"], "degree": r["deg"]}
+        for r in entities
     ] + [
-        {"source": f"d{d}", "target": f"e{e}", "label": "mentions", "kind": "mention"}
-        for e, d in mentions
-        if e in included
+        {"id": f"d{r['id']}", "name": r["filename"], "type": "document", "degree": 1}
+        for r in docs
+    ]
+    links = [
+        {"source": f"e{r['a_entity']}", "target": f"e{r['b_entity']}", "label": r["label"], "kind": "relation"}
+        for r in relations
+        if r["a_entity"] in included and r["b_entity"] in included
+    ] + [
+        {"source": f"d{r['document_id']}", "target": f"e{r['a_entity']}", "label": "mentions", "kind": "mention"}
+        for r in mentions
+        if r["a_entity"] in included
     ]
     return {"nodes": nodes, "links": links}
 
