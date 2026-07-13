@@ -23,14 +23,21 @@ export const TYPE_COLORS = {
 // a giant blob that swallows its neighbors
 export const nodeRadius = (n) => 2 + Math.min(Math.sqrt(n.degree || 1) * 1.3, 10);
 
-// Lay the graph out ONCE, synchronously, before it's rendered, so it starts in a
-// natural, connectivity-based cluster shape instead of react-force-graph's rigid
-// phyllotaxis circle. Related nodes (entity↔entity relations) pull together into
-// organic clumps; document→entity mention links stay weak so documents drift to
-// the edges of their cluster rather than pulling everything into one hairball.
-// Deterministic and identical in every browser. Mutates graph.nodes (adds x/y);
-// the caller pins these positions so the live engine stays interactive without
-// drifting back toward a circle.
+// Force parameters shared by the one-time precompute AND the live engine, so the
+// running simulation maintains exactly the layout we settled — it can't drift
+// back toward react-force-graph's default circle. All bounded (capped repulsion
+// range + gravity) so nodes can never fly off to NaN, which is what blanked the
+// canvas before.
+const CHARGE_STRENGTH = -55;
+const CHARGE_MAX = 200;
+const linkDistance = (l) => (l.kind === "mention" ? 55 : 28);
+const linkStrength = (l) => (l.kind === "mention" ? 0.05 : 0.5);
+const GRAVITY = 0.035;
+
+// Precompute a natural, connectivity-based cluster layout before first render so
+// the graph never appears as the rigid phyllotaxis circle, then hand it to the
+// LIVE engine (positions not pinned) so dragging a node pulls its neighbours
+// along — real physics. Mutates graph.nodes (adds x/y).
 function computeLayout(graph) {
   // run on copies of the links so the originals keep their string source/target
   // ids for react-force-graph (d3's forceLink rewrites them to node objects).
@@ -42,27 +49,13 @@ function computeLayout(graph) {
     .filter((l) => ids.has(l.source) && ids.has(l.target))
     .map((l) => ({ source: l.source, target: l.target, kind: l.kind }));
   const sim = forceSimulation(graph.nodes, 2)
-    .force("charge", forceManyBody().strength(-70).distanceMax(240))
-    .force(
-      "link",
-      forceLink(links)
-        .id((n) => n.id)
-        .distance((l) => (l.kind === "mention" ? 55 : 28))
-        .strength((l) => (l.kind === "mention" ? 0.05 : 0.55)),
-    )
+    .force("charge", forceManyBody().strength(CHARGE_STRENGTH).distanceMax(CHARGE_MAX))
+    .force("link", forceLink(links).id((n) => n.id).distance(linkDistance).strength(linkStrength))
     .force("collide", forceCollide((n) => nodeRadius(n) + 2))
-    // mild gravity keeps the whole graph centered and bounded (no runaways)
-    .force("x", forceX().strength(0.04))
-    .force("y", forceY().strength(0.04))
+    .force("x", forceX().strength(GRAVITY))
+    .force("y", forceY().strength(GRAVITY))
     .stop();
   for (let i = 0; i < 320; i++) sim.tick();
-  // pin every node at its computed spot: react-force-graph's live engine then
-  // keeps the layout put (so it can't re-collapse into a circle) while hover,
-  // click and drag all keep working
-  graph.nodes.forEach((n) => {
-    n.fx = n.x;
-    n.fy = n.y;
-  });
 }
 
 export default function Graph({ focusEntity, onFocused }) {
@@ -198,6 +191,19 @@ export default function Graph({ focusEntity, onFocused }) {
     setDetail(null);
   }
 
+  // Configure the LIVE engine's forces the instant the graph mounts (via the ref
+  // callback, before react-force-graph's own warmup) to match the precompute, so
+  // the running simulation holds the same clustered layout instead of drifting to
+  // a circle — and stays bounded so a drag can never fling nodes off to NaN.
+  const initGraph = useCallback((fg) => {
+    fgRef.current = fg;
+    if (!fg) return;
+    fg.d3Force("charge").strength(CHARGE_STRENGTH).distanceMax(CHARGE_MAX);
+    fg.d3Force("link").distance(linkDistance).strength(linkStrength);
+    fg.d3Force("x", forceX().strength(GRAVITY));
+    fg.d3Force("y", forceY().strength(GRAVITY));
+  }, []);
+
   if (data && data.nodes.length === 0) {
     return (
       <div className="card" style={{ maxWidth: 640, margin: "56px auto", textAlign: "center", padding: 48 }}>
@@ -236,12 +242,11 @@ export default function Graph({ focusEntity, onFocused }) {
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 24, alignItems: "flex-start", paddingBottom: 48 }}>
+      <div style={{ position: "relative", paddingBottom: 48 }}>
         <div
           ref={wrapRef}
           className="deep"
           style={{
-            flex: 1,
             minWidth: 0,
             border: "1px solid var(--rim)",
             overflow: "hidden",
@@ -251,7 +256,7 @@ export default function Graph({ focusEntity, onFocused }) {
         >
           {data && (
             <ForceGraph2D
-              ref={fgRef}
+              ref={initGraph}
               graphData={data}
               width={size.w}
               height={size.h}
@@ -286,13 +291,10 @@ export default function Graph({ focusEntity, onFocused }) {
               linkLabel={(l) => l.label}
               onNodeClick={onNodeClick}
               onBackgroundClick={clearSelection}
-              onNodeDragEnd={(node) => {
-                // keep a dragged node where it's dropped (nodes are pinned)
-                node.fx = node.x;
-                node.fy = node.y;
-              }}
+              enableNodeDrag={true}
               warmupTicks={0}
-              cooldownTicks={80}
+              cooldownTicks={90}
+              cooldownTime={8000}
             />
           )}
         </div>
@@ -301,7 +303,18 @@ export default function Graph({ focusEntity, onFocused }) {
           <aside
             key={detail.name}
             className="card panel-slide"
-            style={{ flex: "0 0 340px", maxHeight: "70vh", overflowY: "auto", position: "sticky", top: 84 }}
+            style={{
+              // float over the graph instead of shrinking it — resizing the
+              // canvas mid-interaction was one cause of the graph blanking out
+              position: "absolute",
+              top: 16,
+              right: 16,
+              width: 340,
+              maxHeight: "calc(100% - 80px)",
+              overflowY: "auto",
+              zIndex: 5,
+              boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+            }}
           >
             <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 4 }}>
               <h2 className="heading-sm" style={{ flex: 1 }}>{detail.name}</h2>
