@@ -13,12 +13,17 @@ Live: https://graphmind-r439.onrender.com · Working dir: `C:\Users\bifro\OneDri
 - [x] Gemini fallback added (`_call_llm` in `graphbuild.py`) — tries Groq, falls to Gemini on rate-limit
 - [x] **Neon idle-connection crash fixed** (2026-07-13): `psycopg_pool.ConnectionPool` had no health check, so a connection Neon closed server-side while idle would be handed out dead, crashing `process_document` with `OperationalError: server closed the connection unexpectedly`. Fixed with `check=ConnectionPool.check_connection` in `backend/db.py`. Verified: requeued and reprocessed a real failed doc (4 chunks) end-to-end, no crash.
 - [x] Retry-script duplicate-process guard: `_retry_failed.py` now takes a PID lock file (`_retry.lock`) and refuses to start a second copy — closes the exact hazard that clobbered 282 docs' chunks on 2026-07-12.
-- [ ] **261 failed documents reprocessing** — retry launched 2026-07-13 as a single harness-tracked background run (task `b2k52adu9`). Check status with:
+- [x] **First retry pass run 2026-07-13** (task `b2k52adu9`, 260 docs attempted): 44 processed, 216 still failed. Overall document count: 165/381 processed, 216 failed. Every failure in the back half of the run was `429 RESOURCE_EXHAUSTED` from Gemini (its 20-req/day free quota burned out fast) with ~37s per attempt — meaning Groq was *also* rate-limited on those same docs before falling through to Gemini. Both providers' free daily quotas are exhausted for the day; this is a real provider-side cap, not a code bug.
+- [ ] **216 documents still need reprocessing** — resume with the exact same command once quotas reset (likely a UTC day boundary):
+  ```
+  .venv/Scripts/python _retry_failed.py
+  ```
+  Safe to just rerun: the PID lock (`_retry.lock`) stops duplicates, and the atomic claim means only 'failed' docs get picked up. No need to requeue manually.
+- [ ] Check status any time with:
   ```
   .venv/Scripts/python -c "from backend import main as _boot; from backend import db; print(db.connect().__enter__().execute(\"SELECT status, count(*) FROM documents GROUP BY status\").fetchall())"
   ```
-  If it stalls or dies, check for a stale `_retry.lock` before rerunning — delete it only if `tasklist /FI "PID eq <pid>"` shows the pid is gone.
-- [ ] **Known real limit:** Gemini free tier is `generativelanguage.googleapis.com/generate_content_free_tier_requests` = 20/day for `gemini-flash-latest` — it is a small safety valve, not a real second lane. The backlog is still bottlenecked on Groq's free-tier RPM/RPD; expect the retry to take a long time (minutes-per-doc under contention) and to possibly need re-running across a day boundary once Groq's daily cap resets. Don't be surprised if it's still grinding after this session ends — resume it, don't restart the whole backlog blind (the PID lock + atomic claim make resuming safe).
+- [ ] **Known real limit:** Gemini free tier is `generativelanguage.googleapis.com/generate_content_free_tier_requests` = 20/day for `gemini-flash-latest` — it is a small safety valve, not a real second lane. The backlog is bottlenecked on Groq's own free-tier daily cap. Expect this to take several more retry passes across multiple days to fully clear 216 docs at ~20-40 successful extractions/day. If clearing the full backlog matters more than staying free, a paid Groq/Gemini tier is the actual unblock — flag to Arnav before spending anything.
 - [ ] One doc failed on `"Expecting ',' delimiter"` — a malformed-JSON response from the LLM, not a rate limit. If it recurs after retry, worth wrapping `_extract_groq`/`_extract_gemini`'s `json.loads` in a repair-retry (ask the model to fix its own JSON) rather than failing the whole doc.
 - [ ] Once the retry finishes: confirm `processed` count and spot-check the Graph tab looks materially richer with the full 381-doc vault loaded, not just the ~120 that succeeded originally.
 
