@@ -102,6 +102,11 @@ def connect():
             max_size=4,
             kwargs={"connect_timeout": 15},
             open=True,
+            # Neon closes idle server-side connections; without this, the pool
+            # hands out a dead connection and the first query on it dies with
+            # "server closed the connection unexpectedly" (hit during a long
+            # multi-doc retry batch where connections sit idle between LLM calls).
+            check=ConnectionPool.check_connection,
         )
     return _pool.connection()
 
