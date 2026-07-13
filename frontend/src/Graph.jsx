@@ -55,7 +55,9 @@ export default function Graph({ focusEntity, onFocused }) {
 
   useEffect(() => {
     function measure() {
-      if (wrapRef.current) {
+      // clientWidth is 0 while the tab is hidden (display:none) — ignore those
+      // so a background resize doesn't collapse the canvas to zero width
+      if (wrapRef.current && wrapRef.current.clientWidth > 0) {
         setSize({
           w: wrapRef.current.clientWidth,
           h: Math.max(420, window.innerHeight - 230),

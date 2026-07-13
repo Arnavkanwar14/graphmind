@@ -40,10 +40,20 @@ export default function App() {
   const [user, setUser] = useState(undefined); // undefined = checking
   const [tab, setTab] = useState("Documents");
   const [focusEntity, setFocusEntity] = useState(null);
+  // A tab mounts on first visit and then stays mounted (hidden via CSS). This
+  // keeps navigation instant — the Graph's force simulation and each tab's
+  // fetch happen once per session, not on every revisit — and avoids re-hitting
+  // the same read endpoints each time the user switches tabs.
+  const [visited, setVisited] = useState({ Documents: true });
+
+  function goTab(t) {
+    setVisited((v) => (v[t] ? v : { ...v, [t]: true }));
+    setTab(t);
+  }
 
   function showEntity(id) {
     setFocusEntity(id);
-    setTab("Graph");
+    goTab("Graph");
   }
 
   useEffect(() => {
@@ -72,7 +82,7 @@ export default function App() {
           <button
             key={t}
             className={`nav-link${tab === t ? " active" : ""}`}
-            onClick={() => setTab(t)}
+            onClick={() => goTab(t)}
           >
             {t}
           </button>
@@ -84,14 +94,25 @@ export default function App() {
         </button>
       </nav>
       <main className="page">
-        {tab === "Documents" ? (
-          <Documents />
-        ) : tab === "Graph" ? (
-          <Graph focusEntity={focusEntity} onFocused={() => setFocusEntity(null)} />
-        ) : tab === "Chat" ? (
-          <Chat onShowEntity={showEntity} />
-        ) : (
-          <Dashboard />
+        {visited.Documents && (
+          <div style={{ display: tab === "Documents" ? "block" : "none" }}>
+            <Documents />
+          </div>
+        )}
+        {visited.Graph && (
+          <div style={{ display: tab === "Graph" ? "block" : "none" }}>
+            <Graph focusEntity={focusEntity} onFocused={() => setFocusEntity(null)} />
+          </div>
+        )}
+        {visited.Chat && (
+          <div style={{ display: tab === "Chat" ? "block" : "none" }}>
+            <Chat onShowEntity={showEntity} />
+          </div>
+        )}
+        {visited.Dashboard && (
+          <div style={{ display: tab === "Dashboard" ? "block" : "none" }}>
+            <Dashboard />
+          </div>
         )}
       </main>
     </div>
