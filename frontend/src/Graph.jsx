@@ -38,19 +38,24 @@ function computeLayout(graph) {
     .filter((l) => ids.has(l.source) && ids.has(l.target))
     .map((l) => ({ source: l.source, target: l.target, kind: l.kind }));
   const sim = forceSimulation(graph.nodes, 2)
-    .force("charge", forceManyBody().strength(-170).distanceMax(420))
+    // moderate repulsion pushes distinct clusters apart from each other
+    .force("charge", forceManyBody().strength(-85).distanceMax(260))
     .force(
       "link",
       forceLink(links)
         .id((n) => n.id)
-        .distance((l) => (l.kind === "mention" ? 30 : 58))
-        .strength(0.22),
+        // entity↔entity relations pull TIGHT and short so genuinely related
+        // nodes clump into a cluster; document→entity "mention" links stay long
+        // and weak so a document loosely orbits its entities instead of dragging
+        // every doc-shared entity into one hairball
+        .distance((l) => (l.kind === "mention" ? 46 : 20))
+        .strength((l) => (l.kind === "mention" ? 0.04 : 0.9)),
     )
-    .force("collide", forceCollide(7))
-    .force("x", forceX().strength(0.045))
-    .force("y", forceY().strength(0.045))
+    .force("collide", forceCollide(6))
+    .force("x", forceX().strength(0.03))
+    .force("y", forceY().strength(0.03))
     .stop();
-  for (let i = 0; i < 320; i++) sim.tick();
+  for (let i = 0; i < 400; i++) sim.tick();
 }
 
 export default function Graph({ focusEntity, onFocused }) {
@@ -58,6 +63,7 @@ export default function Graph({ focusEntity, onFocused }) {
   const [detail, setDetail] = useState(null); // {name, type, relations, sources, documents}
   const [size, setSize] = useState({ w: 800, h: 560 });
   const [hoverType, setHoverType] = useState(null); // legend hover -> dims other types
+  const [selected, setSelected] = useState(null); // {id, neighbors:Set} -> highlight a node's neighborhood
   const [ready, setReady] = useState(false); // fades the canvas in once positioned
   const wrapRef = useRef();
   const fgRef = useRef();
@@ -115,39 +121,74 @@ export default function Graph({ focusEntity, onFocused }) {
     return () => window.removeEventListener("resize", measure);
   }, [data]);
 
-  const drawNode = useCallback((node, ctx, scale) => {
-    const dim = hoverTypeRef.current && node.type !== hoverTypeRef.current;
-    const r = 2.5 + Math.sqrt(node.degree || 1) * 1.6;
-    ctx.globalAlpha = dim ? 0.15 : 1;
-    ctx.beginPath();
-    ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
-    ctx.fillStyle = TYPE_COLORS[node.type] || TYPE_COLORS.concept;
-    ctx.fill();
-    if (node.type === "document") {
-      ctx.strokeStyle = "#e9ebdf";
-      ctx.lineWidth = 0.7;
-      ctx.stroke();
-    }
-    if (node.id === highlightRef.current) {
+  const drawNode = useCallback(
+    (node, ctx, scale) => {
+      const isSel = selected && node.id === selected.id;
+      // when a node is selected, dim everything outside its neighborhood; else
+      // fall back to the legend-hover dimming
+      const dim = selected
+        ? !selected.neighbors.has(node.id)
+        : hoverTypeRef.current && node.type !== hoverTypeRef.current;
+      const r = 2.5 + Math.sqrt(node.degree || 1) * 1.6;
+      ctx.globalAlpha = dim ? 0.08 : 1;
       ctx.beginPath();
-      ctx.arc(node.x, node.y, r + 3, 0, 2 * Math.PI);
-      ctx.strokeStyle = "#e9ebdf";
-      ctx.lineWidth = 1.2;
-      ctx.stroke();
-    }
-    if (!dim && (scale > 1.4 || (node.degree || 0) > 6)) {
-      ctx.font = `${Math.max(9 / scale, 2.4)}px "Space Grotesk", sans-serif`;
-      ctx.fillStyle = "rgba(233, 235, 223, 0.85)";
-      ctx.textAlign = "center";
-      ctx.fillText(node.name.slice(0, 28), node.x, node.y + r + 5 / scale);
-    }
-    ctx.globalAlpha = 1;
-  }, []);
+      ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
+      ctx.fillStyle = TYPE_COLORS[node.type] || TYPE_COLORS.concept;
+      ctx.fill();
+      if (node.type === "document") {
+        ctx.strokeStyle = "#e9ebdf";
+        ctx.lineWidth = 0.7;
+        ctx.stroke();
+      }
+      if (isSel || node.id === highlightRef.current) {
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, r + 3, 0, 2 * Math.PI);
+        ctx.strokeStyle = "#e9ebdf";
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+      }
+      // label the selected node + its neighbors, plus hubs when zoomed in
+      const labelled =
+        (selected && selected.neighbors.has(node.id)) ||
+        scale > 1.4 ||
+        (node.degree || 0) > 6;
+      if (!dim && labelled) {
+        ctx.font = `${Math.max(9 / scale, 2.4)}px "Space Grotesk", sans-serif`;
+        ctx.fillStyle = "rgba(233, 235, 223, 0.85)";
+        ctx.textAlign = "center";
+        ctx.fillText(node.name.slice(0, 28), node.x, node.y + r + 5 / scale);
+      }
+      ctx.globalAlpha = 1;
+    },
+    [selected],
+  );
 
+  // click a node -> highlight its neighborhood in the graph and (for entities)
+  // open the side panel listing its relationships and source files
   async function onNodeClick(node) {
-    if (!node.id.startsWith("e")) return;
-    const r = await fetch(`/api/graph/entity/${node.id.slice(1)}`);
-    if (r.ok) setDetail(await r.json());
+    const neighbors = new Set([node.id]);
+    for (const l of data.links) {
+      const s = typeof l.source === "object" ? l.source.id : l.source;
+      const t = typeof l.target === "object" ? l.target.id : l.target;
+      if (s === node.id) neighbors.add(t);
+      else if (t === node.id) neighbors.add(s);
+    }
+    setSelected({ id: node.id, neighbors });
+    if (!node.id.startsWith("e")) {
+      setDetail(null); // document node: highlight only, no entity detail to fetch
+      return;
+    }
+    try {
+      const r = await fetch(`/api/graph/entity/${node.id.slice(1)}`);
+      if (r.ok) setDetail(await r.json());
+    } catch {
+      /* transient network error — keep the highlight, skip the panel */
+    }
+  }
+
+  function clearSelection() {
+    setSelected(null);
+    setDetail(null);
   }
 
   if (data && data.nodes.length === 0) {
@@ -218,14 +259,26 @@ export default function Graph({ focusEntity, onFocused }) {
               }}
               linkColor={(l) => {
                 const base = l.kind === "mention" ? [24, 88, 73] : [139, 134, 127];
+                if (selected) {
+                  const s = typeof l.source === "object" ? l.source.id : l.source;
+                  const t = typeof l.target === "object" ? l.target.id : l.target;
+                  const touches = s === selected.id || t === selected.id;
+                  return `rgba(${base.join(",")}, ${touches ? 0.8 : 0.03})`;
+                }
                 const ht = hoverTypeRef.current;
                 if (!ht) return `rgba(${base.join(",")}, 0.35)`;
                 const touches = l.source?.type === ht || l.target?.type === ht;
                 return `rgba(${base.join(",")}, ${touches ? 0.55 : 0.05})`;
               }}
-              linkWidth={(l) => (l.kind === "mention" ? 0.5 : 1)}
+              linkWidth={(l) => {
+                if (!selected) return l.kind === "mention" ? 0.5 : 1;
+                const s = typeof l.source === "object" ? l.source.id : l.source;
+                const t = typeof l.target === "object" ? l.target.id : l.target;
+                return s === selected.id || t === selected.id ? 2 : 0.5;
+              }}
               linkLabel={(l) => l.label}
               onNodeClick={onNodeClick}
+              onBackgroundClick={clearSelection}
               warmupTicks={0}
               cooldownTicks={0}
             />
@@ -240,7 +293,7 @@ export default function Graph({ focusEntity, onFocused }) {
           >
             <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 4 }}>
               <h2 className="heading-sm" style={{ flex: 1 }}>{detail.name}</h2>
-              <button className="link-quiet" onClick={() => setDetail(null)}>close</button>
+              <button className="link-quiet" onClick={clearSelection}>close</button>
             </div>
             <p className="micro" style={{ marginBottom: 20, color: TYPE_COLORS[detail.type] }}>
               {detail.type}
