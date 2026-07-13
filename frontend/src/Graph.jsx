@@ -19,14 +19,25 @@ export const TYPE_COLORS = {
   document: "#185849",
 };
 
+// One anchor region per node type, arranged in a ring. Nodes are pulled toward
+// their type's anchor so the graph settles into six distinct, color-matched
+// clusters (people here, orgs there, …) instead of one jumbled blob — a densely
+// cross-linked graph never separates on its own, so we group it explicitly.
+const CLUSTER_ORDER = ["concept", "product", "org", "person", "place", "document"];
+const CLUSTER_R = 420;
+const CLUSTER_ANCHOR = {};
+CLUSTER_ORDER.forEach((t, i) => {
+  const a = (i / CLUSTER_ORDER.length) * 2 * Math.PI - Math.PI / 2;
+  CLUSTER_ANCHOR[t] = { x: Math.cos(a) * CLUSTER_R, y: Math.sin(a) * CLUSTER_R };
+});
+const anchorOf = (n) => CLUSTER_ANCHOR[n.type] || CLUSTER_ANCHOR.concept;
+
 // Lay the graph out ONCE, synchronously, before it's ever rendered — instead of
 // letting react-force-graph animate it. Its runtime simulation left the nodes
 // frozen in a rigid phyllotaxis circle (it rebuilds its own forces on mount, and
 // the only override hook depends on an animation loop that browsers throttle when
-// the tab isn't focused). Precomputing positions here is deterministic: strong
-// range-capped repulsion spreads clusters apart, links pull related nodes
-// together, and mild x/y gravity keeps it centered — the organic Obsidian look,
-// identical in every browser. Mutates graph.nodes in place (adds x/y).
+// the tab isn't focused). Precomputing here is deterministic and identical in
+// every browser. Mutates graph.nodes in place (adds x/y).
 function computeLayout(graph) {
   // run on copies of the links so the originals keep their string source/target
   // ids for react-force-graph (d3's forceLink rewrites them to node objects).
@@ -38,22 +49,21 @@ function computeLayout(graph) {
     .filter((l) => ids.has(l.source) && ids.has(l.target))
     .map((l) => ({ source: l.source, target: l.target, kind: l.kind }));
   const sim = forceSimulation(graph.nodes, 2)
-    // moderate repulsion pushes distinct clusters apart from each other
-    .force("charge", forceManyBody().strength(-85).distanceMax(260))
+    // local repulsion spreads nodes within a cluster so they don't stack
+    .force("charge", forceManyBody().strength(-38).distanceMax(160))
+    // links give intra-cluster structure but stay gentle so the type anchors,
+    // not the dense mention mesh, decide where a node ends up
     .force(
       "link",
       forceLink(links)
         .id((n) => n.id)
-        // entity↔entity relations pull TIGHT and short so genuinely related
-        // nodes clump into a cluster; document→entity "mention" links stay long
-        // and weak so a document loosely orbits its entities instead of dragging
-        // every doc-shared entity into one hairball
-        .distance((l) => (l.kind === "mention" ? 46 : 20))
-        .strength((l) => (l.kind === "mention" ? 0.04 : 0.9)),
+        .distance((l) => (l.kind === "mention" ? 34 : 18))
+        .strength((l) => (l.kind === "mention" ? 0.02 : 0.25)),
     )
-    .force("collide", forceCollide(6))
-    .force("x", forceX().strength(0.03))
-    .force("y", forceY().strength(0.03))
+    .force("collide", forceCollide(5))
+    // the clustering forces: pull every node toward its type's anchor region
+    .force("x", forceX((n) => anchorOf(n).x).strength(0.32))
+    .force("y", forceY((n) => anchorOf(n).y).strength(0.32))
     .stop();
   for (let i = 0; i < 400; i++) sim.tick();
 }
