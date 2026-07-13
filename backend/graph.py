@@ -51,40 +51,34 @@ def graph(user: dict = Depends(current_user)):
 
 @router.get("/entity/{entity_id}")
 def entity_detail(entity_id: int, user: dict = Depends(current_user)):
+    # One round trip instead of four: this fires on every graph-node click, so
+    # four serial queries meant ~1s of latency per click. Name/type stay scalar
+    # (also the 404 check); relations, sources and mentions come back as arrays.
     with db.connect() as conn:
-        ent = conn.execute(
-            "SELECT display_name, type FROM entities WHERE id = %s AND user_id = %s",
-            (entity_id, user["id"]),
-        ).fetchone()
-        if not ent:
-            raise HTTPException(404, "entity not found")
-        rels = conn.execute(
-            "SELECT o.display_name, x.label, (x.a_entity = %(e)s) outbound FROM edges x"
-            " JOIN entities o ON o.id = CASE WHEN x.a_entity = %(e)s THEN x.b_entity ELSE x.a_entity END"
-            " WHERE x.user_id = %(u)s AND x.kind = 'relation'"
-            " AND (x.a_entity = %(e)s OR x.b_entity = %(e)s) LIMIT 30",
+        r = conn.execute(
+            "SELECT (SELECT display_name FROM entities WHERE id = %(e)s AND user_id = %(u)s),"
+            " (SELECT type FROM entities WHERE id = %(e)s AND user_id = %(u)s),"
+            " coalesce((SELECT json_agg(t) FROM (SELECT o.display_name other, x.label,"
+            "   (x.a_entity = %(e)s) outbound FROM edges x"
+            "   JOIN entities o ON o.id = CASE WHEN x.a_entity = %(e)s THEN x.b_entity ELSE x.a_entity END"
+            "   WHERE x.user_id = %(u)s AND x.kind = 'relation'"
+            "   AND (x.a_entity = %(e)s OR x.b_entity = %(e)s) LIMIT 30) t), '[]'),"
+            " coalesce((SELECT json_agg(t) FROM (SELECT DISTINCT d.filename document, c.page_no,"
+            "   left(c.text, 260) excerpt FROM edges x"
+            "   JOIN chunks c ON c.id = x.chunk_id JOIN documents d ON d.id = x.document_id"
+            "   WHERE x.user_id = %(u)s AND x.kind = 'relation'"
+            "   AND (x.a_entity = %(e)s OR x.b_entity = %(e)s) LIMIT 6) t), '[]'),"
+            " coalesce((SELECT json_agg(filename) FROM (SELECT DISTINCT d.filename FROM edges x"
+            "   JOIN documents d ON d.id = x.document_id"
+            "   WHERE x.user_id = %(u)s AND x.kind = 'mention' AND x.a_entity = %(e)s LIMIT 10) t), '[]')",
             {"e": entity_id, "u": user["id"]},
-        ).fetchall()
-        sources = conn.execute(
-            "SELECT DISTINCT d.filename, c.page_no, left(c.text, 260) FROM edges x"
-            " JOIN chunks c ON c.id = x.chunk_id JOIN documents d ON d.id = x.document_id"
-            " WHERE x.user_id = %s AND x.kind = 'relation'"
-            " AND (x.a_entity = %s OR x.b_entity = %s) LIMIT 6",
-            (user["id"], entity_id, entity_id),
-        ).fetchall()
-        mention_docs = conn.execute(
-            "SELECT DISTINCT d.filename FROM edges x JOIN documents d ON d.id = x.document_id"
-            " WHERE x.user_id = %s AND x.kind = 'mention' AND x.a_entity = %s LIMIT 10",
-            (user["id"], entity_id),
-        ).fetchall()
+        ).fetchone()
+    if r[0] is None:
+        raise HTTPException(404, "entity not found")
     return {
-        "name": ent[0],
-        "type": ent[1],
-        "relations": [
-            {"other": r[0], "label": r[1], "outbound": r[2]} for r in rels
-        ],
-        "sources": [
-            {"document": s[0], "page_no": s[1], "excerpt": s[2]} for s in sources
-        ],
-        "documents": [d[0] for d in mention_docs],
+        "name": r[0],
+        "type": r[1],
+        "relations": r[2],
+        "sources": r[3],
+        "documents": r[4],
     }

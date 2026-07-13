@@ -201,19 +201,19 @@ def list_documents(user: dict = Depends(current_user)):
 
 @router.get("/{doc_id}/chunks")
 def document_chunks(doc_id: int, user: dict = Depends(current_user)):
+    # One round trip: the ownership check (which drives the 404) and the chunk
+    # fetch ride together — a null owner flag means not-found vs. an owned doc
+    # that simply has no chunks yet.
     with db.connect() as conn:
-        owner = conn.execute(
-            "SELECT 1 FROM documents WHERE id = %s AND user_id = %s",
-            (doc_id, user["id"]),
+        owner, rows = conn.execute(
+            "SELECT (SELECT 1 FROM documents WHERE id = %(d)s AND user_id = %(u)s),"
+            " coalesce((SELECT json_agg(t) FROM (SELECT seq, page_no, text FROM chunks"
+            "   WHERE document_id = %(d)s ORDER BY seq LIMIT 50) t), '[]')",
+            {"d": doc_id, "u": user["id"]},
         ).fetchone()
-        if not owner:
-            raise HTTPException(404, "document not found")
-        rows = conn.execute(
-            "SELECT seq, page_no, text FROM chunks WHERE document_id = %s ORDER BY seq"
-            " LIMIT 50",
-            (doc_id,),
-        ).fetchall()
-    return [{"seq": r[0], "page_no": r[1], "text": r[2]} for r in rows]
+    if owner is None:
+        raise HTTPException(404, "document not found")
+    return rows
 
 
 @router.delete("/{doc_id}")
