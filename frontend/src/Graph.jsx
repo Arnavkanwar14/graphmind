@@ -19,25 +19,18 @@ export const TYPE_COLORS = {
   document: "#185849",
 };
 
-// One anchor region per node type, arranged in a ring. Nodes are pulled toward
-// their type's anchor so the graph settles into six distinct, color-matched
-// clusters (people here, orgs there, …) instead of one jumbled blob — a densely
-// cross-linked graph never separates on its own, so we group it explicitly.
-const CLUSTER_ORDER = ["concept", "product", "org", "person", "place", "document"];
-const CLUSTER_R = 420;
-const CLUSTER_ANCHOR = {};
-CLUSTER_ORDER.forEach((t, i) => {
-  const a = (i / CLUSTER_ORDER.length) * 2 * Math.PI - Math.PI / 2;
-  CLUSTER_ANCHOR[t] = { x: Math.cos(a) * CLUSTER_R, y: Math.sin(a) * CLUSTER_R };
-});
-const anchorOf = (n) => CLUSTER_ANCHOR[n.type] || CLUSTER_ANCHOR.concept;
+// node radius, capped so a huge-degree hub (e.g. degree 400+) doesn't render as
+// a giant blob that swallows its neighbors
+export const nodeRadius = (n) => 2 + Math.min(Math.sqrt(n.degree || 1) * 1.3, 10);
 
-// Lay the graph out ONCE, synchronously, before it's ever rendered — instead of
-// letting react-force-graph animate it. Its runtime simulation left the nodes
-// frozen in a rigid phyllotaxis circle (it rebuilds its own forces on mount, and
-// the only override hook depends on an animation loop that browsers throttle when
-// the tab isn't focused). Precomputing here is deterministic and identical in
-// every browser. Mutates graph.nodes in place (adds x/y).
+// Lay the graph out ONCE, synchronously, before it's rendered, so it starts in a
+// natural, connectivity-based cluster shape instead of react-force-graph's rigid
+// phyllotaxis circle. Related nodes (entity↔entity relations) pull together into
+// organic clumps; document→entity mention links stay weak so documents drift to
+// the edges of their cluster rather than pulling everything into one hairball.
+// Deterministic and identical in every browser. Mutates graph.nodes (adds x/y);
+// the caller pins these positions so the live engine stays interactive without
+// drifting back toward a circle.
 function computeLayout(graph) {
   // run on copies of the links so the originals keep their string source/target
   // ids for react-force-graph (d3's forceLink rewrites them to node objects).
@@ -49,23 +42,27 @@ function computeLayout(graph) {
     .filter((l) => ids.has(l.source) && ids.has(l.target))
     .map((l) => ({ source: l.source, target: l.target, kind: l.kind }));
   const sim = forceSimulation(graph.nodes, 2)
-    // local repulsion spreads nodes within a cluster so they don't stack
-    .force("charge", forceManyBody().strength(-38).distanceMax(160))
-    // links give intra-cluster structure but stay gentle so the type anchors,
-    // not the dense mention mesh, decide where a node ends up
+    .force("charge", forceManyBody().strength(-70).distanceMax(240))
     .force(
       "link",
       forceLink(links)
         .id((n) => n.id)
-        .distance((l) => (l.kind === "mention" ? 34 : 18))
-        .strength((l) => (l.kind === "mention" ? 0.02 : 0.25)),
+        .distance((l) => (l.kind === "mention" ? 55 : 28))
+        .strength((l) => (l.kind === "mention" ? 0.05 : 0.55)),
     )
-    .force("collide", forceCollide(5))
-    // the clustering forces: pull every node toward its type's anchor region
-    .force("x", forceX((n) => anchorOf(n).x).strength(0.32))
-    .force("y", forceY((n) => anchorOf(n).y).strength(0.32))
+    .force("collide", forceCollide((n) => nodeRadius(n) + 2))
+    // mild gravity keeps the whole graph centered and bounded (no runaways)
+    .force("x", forceX().strength(0.04))
+    .force("y", forceY().strength(0.04))
     .stop();
-  for (let i = 0; i < 400; i++) sim.tick();
+  for (let i = 0; i < 320; i++) sim.tick();
+  // pin every node at its computed spot: react-force-graph's live engine then
+  // keeps the layout put (so it can't re-collapse into a circle) while hover,
+  // click and drag all keep working
+  graph.nodes.forEach((n) => {
+    n.fx = n.x;
+    n.fy = n.y;
+  });
 }
 
 export default function Graph({ focusEntity, onFocused }) {
@@ -139,7 +136,7 @@ export default function Graph({ focusEntity, onFocused }) {
       const dim = selected
         ? !selected.neighbors.has(node.id)
         : hoverTypeRef.current && node.type !== hoverTypeRef.current;
-      const r = 2.5 + Math.sqrt(node.degree || 1) * 1.6;
+      const r = nodeRadius(node);
       ctx.globalAlpha = dim ? 0.08 : 1;
       ctx.beginPath();
       ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
@@ -261,7 +258,7 @@ export default function Graph({ focusEntity, onFocused }) {
               backgroundColor="#0e0e0e"
               nodeCanvasObject={drawNode}
               nodePointerAreaPaint={(node, color, ctx) => {
-                const r = 2.5 + Math.sqrt(node.degree || 1) * 1.6 + 3;
+                const r = nodeRadius(node) + 3;
                 ctx.beginPath();
                 ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
                 ctx.fillStyle = color;
@@ -289,8 +286,13 @@ export default function Graph({ focusEntity, onFocused }) {
               linkLabel={(l) => l.label}
               onNodeClick={onNodeClick}
               onBackgroundClick={clearSelection}
+              onNodeDragEnd={(node) => {
+                // keep a dragged node where it's dropped (nodes are pinned)
+                node.fx = node.x;
+                node.fy = node.y;
+              }}
               warmupTicks={0}
-              cooldownTicks={0}
+              cooldownTicks={80}
             />
           )}
         </div>
