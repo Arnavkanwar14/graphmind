@@ -360,13 +360,13 @@ export default function Graph({ focusEntity, onFocused }) {
     dragRef.current = null;
     if (!drag) return;
     if (drag.mode === "node") {
-      drag.node.fx = null;
-      drag.node.fy = null; // release so it floats freely again, not pinned
       if (drag.moved) {
-        // one brief, decaying settle so neighbors drift to the node's new
-        // spot instead of jittering continuously during the drag itself
-        simRef.current?.alpha(0.15).restart();
+        // leave it exactly where it was dropped -- keep it pinned rather than
+        // waking the simulation, which moved every other node for a moment
+        // even though only one was ever meant to be repositioned
       } else {
+        drag.node.fx = null;
+        drag.node.fy = null;
         selectNode(drag.node); // a click, not a drag
       }
     } else if (!drag.moved) {
