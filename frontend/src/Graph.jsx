@@ -1,5 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import ForceGraph2D from "react-force-graph-2d";
+import React, { useEffect, useRef, useState } from "react";
 import {
   forceSimulation,
   forceManyBody,
@@ -23,171 +22,276 @@ export const TYPE_COLORS = {
 // a giant blob that swallows its neighbors
 export const nodeRadius = (n) => 1.8 + Math.min(Math.sqrt(n.degree || 1), 5.5);
 
-// Force parameters shared by the one-time precompute AND the live engine, so the
-// running simulation maintains exactly the layout we settled — it can't drift
-// back toward react-force-graph's default circle. All bounded (capped repulsion
-// range + gravity) so nodes can never fly off to NaN, which is what blanked the
-// canvas before.
 const CHARGE_STRENGTH = -75;
 const CHARGE_MAX = 220;
 const linkDistance = (l) => (l.kind === "mention" ? 60 : 32);
 const linkStrength = (l) => (l.kind === "mention" ? 0.04 : 0.45);
 const GRAVITY = 0.035;
 
-// Precompute a natural, connectivity-based cluster layout before first render so
-// the graph never appears as the rigid phyllotaxis circle, then hand it to the
-// LIVE engine (positions not pinned) so dragging a node pulls its neighbours
-// along — real physics. Mutates graph.nodes (adds x/y).
-function computeLayout(graph) {
-  // run on copies of the links so the originals keep their string source/target
-  // ids for react-force-graph (d3's forceLink rewrites them to node objects).
-  // Drop links whose endpoints aren't in the node set — the graph can contain a
-  // mention edge to a failed document that isn't rendered as a node; react-force-
-  // graph tolerates that dangling link but d3's forceLink throws on it.
-  const ids = new Set(graph.nodes.map((n) => n.id));
-  const links = graph.links
-    .filter((l) => ids.has(l.source) && ids.has(l.target))
-    .map((l) => ({ source: l.source, target: l.target, kind: l.kind }));
-  const sim = forceSimulation(graph.nodes, 2)
+function buildSimulation(nodes, links) {
+  return forceSimulation(nodes, 2)
     .force("charge", forceManyBody().strength(CHARGE_STRENGTH).distanceMax(CHARGE_MAX))
     .force("link", forceLink(links).id((n) => n.id).distance(linkDistance).strength(linkStrength))
     // extra padding beyond the node's own radius so hubs don't visually overlap
     // their neighbors even when several sit at similar distances
     .force("collide", forceCollide((n) => nodeRadius(n) + 5))
     .force("x", forceX().strength(GRAVITY))
-    .force("y", forceY().strength(GRAVITY))
-    .stop();
-  for (let i = 0; i < 320; i++) sim.tick();
+    .force("y", forceY().strength(GRAVITY));
 }
 
+/**
+ * A hand-rolled canvas force graph, not react-force-graph. That library's
+ * render loop kept dying permanently on an internal exception during
+ * click/drag — once its loop crashes, nothing schedules another frame, so the
+ * canvas stays however it looked at that instant: blank, forever. Standard
+ * force-directed graph tooling (the same idiom behind D3's own official
+ * examples, and conceptually what Obsidian's graph view is built on) is just:
+ * a physics simulation + a plain canvas draw loop + your own mouse handlers.
+ * Owning every frame means a single bad frame can never take down the rest —
+ * the draw loop below is wrapped so it always reschedules itself no matter what.
+ */
 export default function Graph({ focusEntity, onFocused }) {
-  const [data, setData] = useState(null);
+  const [meta, setMeta] = useState(null); // {nodeCount, linkCount} just for the header text
+  const [empty, setEmpty] = useState(false);
   const [detail, setDetail] = useState(null); // {name, type, relations, sources, documents}
-  const [size, setSize] = useState({ w: 800, h: 560 });
   const [hoverType, setHoverType] = useState(null); // legend hover -> dims other types
-  const [selected, setSelected] = useState(null); // {id, neighbors:Set} -> highlight a node's neighborhood
   const [ready, setReady] = useState(false); // fades the canvas in once positioned
+
   const wrapRef = useRef();
-  const fgRef = useRef();
-  const highlightRef = useRef(null);
+  const canvasRef = useRef();
+  const simRef = useRef(null);
+  const nodesRef = useRef([]);
+  const linksRef = useRef([]);
+  const sizeRef = useRef({ w: 800, h: 560 });
+  const transformRef = useRef({ x: 0, y: 0, k: 1 }); // screen = graph*k + {x,y}; centered once layout+size are known
+  const selectedRef = useRef(null); // {id, neighbors:Set}
+  const highlightRef = useRef(null); // focused-from-chat entity id, rings it
   const hoverTypeRef = useRef(null);
+  const dragRef = useRef(null);
   hoverTypeRef.current = hoverType;
 
+  // fetch the graph once, precompute a settled layout, then start live physics
   useEffect(() => {
+    let cancelled = false;
     fetch("/api/graph")
       .then((r) => (r.ok ? r.json() : { nodes: [], links: [] }))
       .then((d) => {
-        // position the nodes up front so the graph renders already settled
-        try {
-          if (d.nodes.length) computeLayout(d);
-        } catch (e) {
-          console.error("computeLayout failed:", e);
+        if (cancelled) return;
+        if (!d.nodes.length) {
+          setEmpty(true);
+          return;
         }
-        setData(d);
+        // drop links whose endpoints aren't in the node set — a mention edge
+        // to a failed document that isn't rendered as a node — d3's forceLink
+        // throws on a dangling reference
+        const ids = new Set(d.nodes.map((n) => n.id));
+        const links = d.links
+          .filter((l) => ids.has(l.source) && ids.has(l.target))
+          .map((l) => ({ source: l.source, target: l.target, kind: l.kind, label: l.label }));
+        nodesRef.current = d.nodes;
+        linksRef.current = links;
+
+        // settle the layout synchronously so it never appears as a random
+        // scatter, then keep the SAME simulation running live (standard d3
+        // drag idiom: wake it with alphaTarget on drag, cool it back down after)
+        const sim = buildSimulation(d.nodes, links).stop();
+        for (let i = 0; i < 300; i++) sim.tick();
+        sim.restart();
+        simRef.current = sim;
+
+        // fit the settled layout's bounding box into the canvas instead of
+        // guessing a starting transform
+        const xs = d.nodes.map((n) => n.x).filter(Number.isFinite);
+        const ys = d.nodes.map((n) => n.y).filter(Number.isFinite);
+        if (xs.length) {
+          const minX = Math.min(...xs), maxX = Math.max(...xs);
+          const minY = Math.min(...ys), maxY = Math.max(...ys);
+          const { w, h } = sizeRef.current;
+          const k = Math.min((w * 0.9) / (maxX - minX || 1), (h * 0.9) / (maxY - minY || 1), 3);
+          const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+          transformRef.current = { k, x: w / 2 - cx * k, y: h / 2 - cy * k };
+        }
+
+        setMeta({ nodeCount: d.nodes.length, linkCount: links.length });
         setTimeout(() => setReady(true), 60);
       });
+    return () => {
+      cancelled = true;
+      simRef.current?.stop();
+    };
   }, []);
 
   // arriving from chat: center on the entity, ring it, open its panel
   useEffect(() => {
-    if (!focusEntity || !data) return;
+    if (!focusEntity || !meta) return;
     const nid = `e${focusEntity}`;
     highlightRef.current = nid;
     fetch(`/api/graph/entity/${focusEntity}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => d && setDetail(d));
+    selectedRef.current = null; // let the ring (highlightRef), not a neighborhood dim, carry the emphasis
     const t = setTimeout(() => {
-      const node = data.nodes.find((n) => n.id === nid);
-      if (node && fgRef.current && node.x != null) {
-        fgRef.current.centerAt(node.x, node.y, 700);
-        fgRef.current.zoom(3.5, 700);
+      const node = nodesRef.current.find((n) => n.id === nid);
+      if (node && Number.isFinite(node.x)) {
+        const { w, h } = sizeRef.current;
+        const k = 2.5;
+        transformRef.current = { k, x: w / 2 - node.x * k, y: h / 2 - node.y * k };
       }
       onFocused?.();
-    }, 800);
+    }, 350);
     return () => clearTimeout(t);
-  }, [focusEntity, data]);
+  }, [focusEntity, meta]);
 
+  // size the canvas to its container; ignore while hidden (display:none tab)
   useEffect(() => {
-    function measure() {
-      // clientWidth is 0 while the tab is hidden (display:none) — ignore those
-      // so a background resize doesn't collapse the canvas to zero width
-      if (wrapRef.current && wrapRef.current.clientWidth > 0) {
-        setSize({
-          w: wrapRef.current.clientWidth,
-          h: Math.max(420, window.innerHeight - 230),
-        });
+    const el = wrapRef.current;
+    if (!el) return;
+    function apply() {
+      if (el.clientWidth > 0) {
+        sizeRef.current = { w: el.clientWidth, h: Math.max(420, window.innerHeight - 230) };
+        const cv = canvasRef.current;
+        if (cv) {
+          cv.width = sizeRef.current.w;
+          cv.height = sizeRef.current.h;
+        }
       }
     }
-    measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
-  }, [data]);
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    window.addEventListener("resize", apply);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", apply);
+    };
+  }, []);
 
-  const drawNode = useCallback(
-    (node, ctx, scale) => {
-      // Bulletproof: force-graph's render loop calls this once per node, per
-      // frame, forever — if it ever throws (a NaN mid-drag, an unexpected
-      // field), the loop dies on that exception and the canvas is left however
-      // it was mid-frame: blank, permanently, with no further attempts to
-      // redraw. That crashed-render-loop is what "the graph vanishes on
-      // click/drag" actually was. A try/catch here can't fix the underlying
-      // glitch but guarantees it can never take down every future frame.
+  // the draw loop: runs forever via its own requestAnimationFrame chain,
+  // decoupled from the physics simulation entirely, so panning/zooming/hover
+  // keeps redrawing even once physics has settled. A try/catch means a single
+  // bad frame can never stop the next one from being scheduled.
+  useEffect(() => {
+    if (!meta) return;
+    let raf;
+    function frame() {
       try {
-        if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) return;
-        const isSel = selected && node.id === selected.id;
-        // when a node is selected, dim everything outside its neighborhood;
-        // else fall back to the legend-hover dimming
-        const dim = selected
-          ? !selected.neighbors.has(node.id)
-          : hoverTypeRef.current && node.type !== hoverTypeRef.current;
-        const r = nodeRadius(node);
-        ctx.globalAlpha = dim ? 0.08 : 1;
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
-        ctx.fillStyle = TYPE_COLORS[node.type] || TYPE_COLORS.concept;
-        ctx.fill();
-        if (node.type === "document") {
-          ctx.strokeStyle = "#e9ebdf";
-          ctx.lineWidth = 0.7;
-          ctx.stroke();
-        }
-        if (isSel || node.id === highlightRef.current) {
-          ctx.beginPath();
-          ctx.arc(node.x, node.y, r + 3, 0, 2 * Math.PI);
-          ctx.strokeStyle = "#e9ebdf";
-          ctx.lineWidth = 1.2;
-          ctx.stroke();
-        }
-        // label the selected node + its neighbors, plus hubs when zoomed in
-        const labelled =
-          (selected && selected.neighbors.has(node.id)) ||
-          scale > 1.4 ||
-          (node.degree || 0) > 6;
-        if (!dim && labelled && node.name) {
-          ctx.font = `${Math.max(9 / scale, 2.4)}px "Space Grotesk", sans-serif`;
-          ctx.fillStyle = "rgba(233, 235, 223, 0.85)";
-          ctx.textAlign = "center";
-          ctx.fillText(String(node.name).slice(0, 28), node.x, node.y + r + 5 / scale);
-        }
-        ctx.globalAlpha = 1;
+        drawFrame();
       } catch {
-        ctx.globalAlpha = 1;
+        /* never let one bad frame kill every frame after it */
       }
-    },
-    [selected],
-  );
-
-  // click a node -> highlight its neighborhood in the graph and (for entities)
-  // open the side panel listing its relationships and source files
-  async function onNodeClick(node) {
-    const neighbors = new Set([node.id]);
-    for (const l of data.links) {
-      const s = typeof l.source === "object" ? l.source.id : l.source;
-      const t = typeof l.target === "object" ? l.target.id : l.target;
-      if (s === node.id) neighbors.add(t);
-      else if (t === node.id) neighbors.add(s);
+      raf = requestAnimationFrame(frame);
     }
-    setSelected({ id: node.id, neighbors });
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }, [meta]);
+
+  function drawFrame() {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const { width: w, height: h } = canvas;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = "#0e0e0e";
+    ctx.fillRect(0, 0, w, h);
+
+    const t = transformRef.current;
+    ctx.setTransform(t.k, 0, 0, t.k, t.x, t.y);
+
+    const sel = selectedRef.current;
+    const ht = hoverTypeRef.current;
+    const scale = t.k;
+
+    // links
+    for (const l of linksRef.current) {
+      const s = l.source, d = l.target;
+      if (typeof s !== "object" || typeof d !== "object") continue;
+      if (!Number.isFinite(s.x) || !Number.isFinite(d.x)) continue;
+      const base = l.kind === "mention" ? "24,88,73" : "139,134,127";
+      let alpha = l.kind === "mention" ? 0.3 : 0.35;
+      if (sel) {
+        const touches = s.id === sel.id || d.id === sel.id;
+        alpha = touches ? 0.85 : 0.03;
+      } else if (ht) {
+        const touches = s.type === ht || d.type === ht;
+        alpha = touches ? 0.55 : 0.05;
+      }
+      ctx.strokeStyle = `rgba(${base}, ${alpha})`;
+      ctx.lineWidth = (sel && (s.id === sel.id || d.id === sel.id) ? 2 : l.kind === "mention" ? 0.5 : 1) / scale;
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y);
+      ctx.lineTo(d.x, d.y);
+      ctx.stroke();
+    }
+
+    // nodes
+    for (const node of nodesRef.current) {
+      if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) continue;
+      const isSel = sel && node.id === sel.id;
+      const dim = sel ? !sel.neighbors.has(node.id) : ht && node.type !== ht;
+      const r = nodeRadius(node);
+      ctx.globalAlpha = dim ? 0.08 : 1;
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
+      ctx.fillStyle = TYPE_COLORS[node.type] || TYPE_COLORS.concept;
+      ctx.fill();
+      if (node.type === "document") {
+        ctx.strokeStyle = "#e9ebdf";
+        ctx.lineWidth = 0.7 / scale;
+        ctx.stroke();
+      }
+      if (isSel || node.id === highlightRef.current) {
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, r + 3, 0, 2 * Math.PI);
+        ctx.strokeStyle = "#e9ebdf";
+        ctx.lineWidth = 1.2 / scale;
+        ctx.stroke();
+      }
+      const labelled = (sel && sel.neighbors.has(node.id)) || scale > 1.4 || (node.degree || 0) > 6;
+      if (!dim && labelled && node.name) {
+        ctx.font = `${Math.max(9 / scale, 2.4)}px "Space Grotesk", sans-serif`;
+        ctx.fillStyle = "rgba(233, 235, 223, 0.85)";
+        ctx.textAlign = "center";
+        ctx.fillText(String(node.name).slice(0, 28), node.x, node.y + r + 5 / scale);
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function screenToGraph(sx, sy) {
+    const t = transformRef.current;
+    return { x: (sx - t.x) / t.k, y: (sy - t.y) / t.k };
+  }
+
+  function hitTest(gx, gy) {
+    let best = null, bestDist = Infinity;
+    for (const n of nodesRef.current) {
+      if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) continue;
+      const dx = n.x - gx, dy = n.y - gy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const r = nodeRadius(n) + 4;
+      if (dist <= r && dist < bestDist) {
+        best = n;
+        bestDist = dist;
+      }
+    }
+    return best;
+  }
+
+  function canvasXY(e) {
+    const rect = canvasRef.current.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  async function selectNode(node) {
+    const neighbors = new Set([node.id]);
+    for (const l of linksRef.current) {
+      const s = typeof l.source === "object" ? l.source.id : l.source;
+      const d = typeof l.target === "object" ? l.target.id : l.target;
+      if (s === node.id) neighbors.add(d);
+      else if (d === node.id) neighbors.add(s);
+    }
+    selectedRef.current = { id: node.id, neighbors };
+    highlightRef.current = null;
     if (!node.id.startsWith("e")) {
       setDetail(null); // document node: highlight only, no entity detail to fetch
       return;
@@ -201,24 +305,86 @@ export default function Graph({ focusEntity, onFocused }) {
   }
 
   function clearSelection() {
-    setSelected(null);
+    selectedRef.current = null;
     setDetail(null);
   }
 
-  // Configure the LIVE engine's forces the instant the graph mounts (via the ref
-  // callback, before react-force-graph's own warmup) to match the precompute, so
-  // the running simulation holds the same clustered layout instead of drifting to
-  // a circle — and stays bounded so a drag can never fling nodes off to NaN.
-  const initGraph = useCallback((fg) => {
-    fgRef.current = fg;
-    if (!fg) return;
-    fg.d3Force("charge").strength(CHARGE_STRENGTH).distanceMax(CHARGE_MAX);
-    fg.d3Force("link").distance(linkDistance).strength(linkStrength);
-    fg.d3Force("x", forceX().strength(GRAVITY));
-    fg.d3Force("y", forceY().strength(GRAVITY));
-  }, []);
+  function onMouseDown(e) {
+    const { x, y } = canvasXY(e);
+    const g = screenToGraph(x, y);
+    const node = hitTest(g.x, g.y);
+    if (node) {
+      node.fx = node.x;
+      node.fy = node.y;
+      // don't wake the whole simulation here — that made every node jitter
+      // for as long as you were just moving one. The grabbed node is moved
+      // directly below; everything else gets a single gentle settle on drop.
+      dragRef.current = { mode: "node", node, moved: false, x0: e.clientX, y0: e.clientY };
+    } else {
+      dragRef.current = {
+        mode: "pan",
+        moved: false,
+        x0: e.clientX,
+        y0: e.clientY,
+        tx0: transformRef.current.x,
+        ty0: transformRef.current.y,
+      };
+    }
+  }
 
-  if (data && data.nodes.length === 0) {
+  function onMouseMove(e) {
+    const drag = dragRef.current;
+    if (!drag) return;
+    if (Math.abs(e.clientX - drag.x0) > 3 || Math.abs(e.clientY - drag.y0) > 3) drag.moved = true;
+    if (drag.mode === "node") {
+      const { x, y } = canvasXY(e);
+      const g = screenToGraph(x, y);
+      drag.node.fx = g.x;
+      drag.node.fy = g.y;
+      // apply immediately — fx/fy only take effect on a simulation tick, and
+      // the sim is otherwise idle at rest, so without this the node wouldn't
+      // move at all while the rest of the graph correctly stays put
+      drag.node.x = g.x;
+      drag.node.y = g.y;
+    } else {
+      transformRef.current = {
+        ...transformRef.current,
+        x: drag.tx0 + (e.clientX - drag.x0),
+        y: drag.ty0 + (e.clientY - drag.y0),
+      };
+    }
+  }
+
+  function onMouseUp() {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    if (!drag) return;
+    if (drag.mode === "node") {
+      drag.node.fx = null;
+      drag.node.fy = null; // release so it floats freely again, not pinned
+      if (drag.moved) {
+        // one brief, decaying settle so neighbors drift to the node's new
+        // spot instead of jittering continuously during the drag itself
+        simRef.current?.alpha(0.15).restart();
+      } else {
+        selectNode(drag.node); // a click, not a drag
+      }
+    } else if (!drag.moved) {
+      clearSelection(); // background click
+    }
+  }
+
+  function onWheel(e) {
+    e.preventDefault();
+    const { x, y } = canvasXY(e);
+    const t = transformRef.current;
+    const factor = Math.pow(1.0015, -e.deltaY);
+    const k = Math.min(12, Math.max(0.12, t.k * factor));
+    const gx = (x - t.x) / t.k, gy = (y - t.y) / t.k;
+    transformRef.current = { k, x: x - gx * k, y: y - gy * k };
+  }
+
+  if (empty) {
     return (
       <div className="card" style={{ maxWidth: 640, margin: "56px auto", textAlign: "center", padding: 48 }}>
         <p className="eyebrow" style={{ marginBottom: 12 }}>Graph</p>
@@ -235,7 +401,7 @@ export default function Graph({ focusEntity, onFocused }) {
       <div className="page-head rise" style={{ paddingBottom: 20 }}>
         <div>
           <p className="eyebrow" style={{ marginBottom: 10 }}>
-            {data ? `${data.nodes.length} nodes · ${data.links.length} edges` : "loading"}
+            {meta ? `${meta.nodeCount} nodes · ${meta.linkCount} edges` : "loading"}
           </p>
           <h1 className="heading-lg">Knowledge graph</h1>
         </div>
@@ -268,69 +434,17 @@ export default function Graph({ focusEntity, onFocused }) {
             transition: "opacity 0.5s var(--ease)",
           }}
         >
-          {data && (
-            <ForceGraph2D
-              ref={initGraph}
-              graphData={data}
-              width={size.w}
-              height={size.h}
-              backgroundColor="#0e0e0e"
-              nodeCanvasObject={drawNode}
-              nodePointerAreaPaint={(node, color, ctx) => {
-                try {
-                  if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) return;
-                  const r = nodeRadius(node) + 3;
-                  ctx.beginPath();
-                  ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
-                  ctx.fillStyle = color;
-                  ctx.fill();
-                } catch {
-                  /* never let a bad node crash the render loop */
-                }
-              }}
-              linkColor={(l) => {
-                try {
-                  const base = l.kind === "mention" ? [24, 88, 73] : [139, 134, 127];
-                  if (selected) {
-                    const s = typeof l.source === "object" ? l.source.id : l.source;
-                    const t = typeof l.target === "object" ? l.target.id : l.target;
-                    const touches = s === selected.id || t === selected.id;
-                    return `rgba(${base.join(",")}, ${touches ? 0.8 : 0.03})`;
-                  }
-                  const ht = hoverTypeRef.current;
-                  if (!ht) return `rgba(${base.join(",")}, 0.35)`;
-                  const touches = l.source?.type === ht || l.target?.type === ht;
-                  return `rgba(${base.join(",")}, ${touches ? 0.55 : 0.05})`;
-                } catch {
-                  return "rgba(139,134,127,0.2)";
-                }
-              }}
-              linkWidth={(l) => {
-                try {
-                  if (!selected) return l.kind === "mention" ? 0.5 : 1;
-                  const s = typeof l.source === "object" ? l.source.id : l.source;
-                  const t = typeof l.target === "object" ? l.target.id : l.target;
-                  return s === selected.id || t === selected.id ? 2 : 0.5;
-                } catch {
-                  return 0.5;
-                }
-              }}
-              linkLabel={(l) => l.label}
-              onNodeClick={onNodeClick}
-              onBackgroundClick={clearSelection}
-              enableNodeDrag={true}
-              enableZoomInteraction={true}
-              enablePanInteraction={true}
-              minZoom={0.15}
-              maxZoom={12}
-              // The real cause of "click a node -> graph goes blank": this
-              // library stops its render loop once physics settles, to save
-              // CPU (autoPauseRedraw defaults true). Any prop change after that
-              // point (like the dim/highlight state a click sets) has nothing
-              // repainting the canvas, so it can go dark. Keep it always on.
-              autoPauseRedraw={false}
-              warmupTicks={0}
-              cooldownTicks={200}
+          {meta && (
+            <canvas
+              ref={canvasRef}
+              width={sizeRef.current.w}
+              height={sizeRef.current.h}
+              style={{ display: "block", cursor: "grab" }}
+              onMouseDown={onMouseDown}
+              onMouseMove={onMouseMove}
+              onMouseUp={onMouseUp}
+              onMouseLeave={onMouseUp}
+              onWheel={onWheel}
             />
           )}
         </div>
@@ -341,7 +455,7 @@ export default function Graph({ focusEntity, onFocused }) {
             className="card panel-slide"
             style={{
               // float over the graph instead of shrinking it — resizing the
-              // canvas mid-interaction was one cause of the graph blanking out
+              // canvas mid-interaction was one cause of the old blank-out
               position: "absolute",
               top: 16,
               right: 16,
